@@ -23,7 +23,8 @@ Live production system for a school festival. Read `docs/ARCHITECTURE.md` first 
 
 ## Status (2026-11-19)
 
-Verified: 86 backend tests; full dashboard click-through in simulation; OBS probe page against live vdo.ninja
-(IFRAME API stats shape confirmed); phone page → VDO.Ninja publish hand-off.
-Not yet verified on hardware: real phone feed, real OBS 33 connection, NVENC recording, MediaMTX TV playback
-(see docs/SETUP.md checklist).
+Verified: 88 backend tests; dashboard click-through in simulation and on real OBS 33.0.1 (WS 5.7.6);
+`scripts/obs_smoke_test.py` all-pass on the real PC (sources, probe pages inside OBS, layout transforms,
+NVENC H.264 1920x1080 MKV verified by ffprobe); probe page against live vdo.ninja; phone page hand-off.
+Not yet verified: real phone feed, MediaMTX TV playback (see docs/SETUP.md checklist).
+This PC: another service owns 127.0.0.1:8000 (hence port 8420); OBS canvas is 2560x1440@60 -> 1080p output.

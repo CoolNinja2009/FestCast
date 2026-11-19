@@ -97,3 +97,26 @@ def test_recording_after_interruption_gets_new_row(env):
     h = _history(env)
     assert len(h) == 2
     assert next(x for x in h if x["id"] == rid)["status"] == "interrupted"
+
+
+def test_format_change_reloads_obs_profile(env):
+    """Real OBS 33 only applies a new recording format after its outputs are rebuilt: a changed format must
+    trigger the temporary-profile reload, and the operator's own profile must end up current again."""
+    mock = env.mock
+    mock.profile[("SimpleOutput", "RecFormat2")] = "hybrid_mp4"
+    before = mock.reloads
+    applied = env.run(env.ctx.recording.apply_to_obs)
+    assert applied["outputs_reloaded"] is True
+    assert mock.reloads == before + 2 and mock.profile_name == "Untitled" and mock.profiles == ["Untitled"]
+    again = env.run(env.ctx.recording.apply_to_obs)
+    assert again["outputs_reloaded"] is False and mock.reloads == before + 2
+
+
+def test_no_profile_reload_while_recording(env):
+    mock = env.mock
+    env.client.post("/api/recording/start").raise_for_status()
+    mock.profile[("SimpleOutput", "RecFormat2")] = "hybrid_mp4"
+    before = mock.reloads
+    applied = env.run(env.ctx.recording.apply_to_obs)
+    assert applied["outputs_reloaded"] is False and mock.reloads == before
+    env.client.post("/api/recording/stop")

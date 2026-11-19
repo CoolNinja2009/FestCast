@@ -297,6 +297,17 @@ class OBSController:
                                                 "sceneItemEnabled": enabled})
         return r["sceneItemId"]
 
+    async def fit_full(self, scene: str, source: str) -> None:
+        """Make `source` fill the whole OBS canvas in `scene` (whatever the canvas size is)."""
+        iid = await self.item_id(scene, source)
+        if iid is None:
+            return
+        v = self.state.get("video") or {}
+        await self.call("SetSceneItemTransform", {"sceneName": scene, "sceneItemId": iid, "sceneItemTransform": {
+            "positionX": 0.0, "positionY": 0.0, "alignment": 5, "rotation": 0.0,
+            "boundsType": "OBS_BOUNDS_SCALE_INNER", "boundsAlignment": 0,
+            "boundsWidth": float(v.get("base_w") or 1920), "boundsHeight": float(v.get("base_h") or 1080)}})
+
     async def screenshot(self, source: str, width: int = 480, quality: int = 60) -> str | None:
         r = await self.try_call("GetSourceScreenshot", {"sourceName": source, "imageFormat": "jpg",
                                                          "imageWidth": width, "imageCompressionQuality": quality})

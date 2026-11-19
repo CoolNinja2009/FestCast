@@ -82,7 +82,7 @@ function loginView(remoteEnabled: boolean) {
     h('div.ph', null, h('h2', null, 'FestCast operator login')),
     h('div.pb.col', null,
       remoteEnabled ? [pw, h('button.btn.primary', { onclick: go }, 'Sign in')]
-        : h('p.dim', null, 'Remote control is disabled. Open FestCast on the production PC (http://localhost:8000), or set FESTCAST_ADMIN_PASSWORD there to allow control from this device.'))));
+        : h('p.dim', null, 'Remote control is disabled. Open FestCast on the production PC (http://localhost:8420), or set FESTCAST_ADMIN_PASSWORD there to allow control from this device.'))));
   app.style.display = 'block';
 }
 

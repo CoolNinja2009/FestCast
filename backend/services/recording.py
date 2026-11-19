@@ -124,16 +124,68 @@ class RecordingService:
         if mode != "Simple" and c.get("segment_minutes"):
             sets += [(sec, "RecSplitFile", "true"), (sec, "RecSplitFileType", "Time"),
                      (sec, "RecSplitFileTime", str(int(c["segment_minutes"])))]
+        # OBS caches the muxer/encoder settings in its outputs: changing them in the profile is NOT used until the
+        # outputs are rebuilt (verified: a "mkv" profile still wrote MP4). Remember what changes, reload if needed.
+        needs_reload = False
         for cat, name, val in sets:
+            before = await obs.try_call("GetProfileParameter", {"parameterCategory": cat, "parameterName": name})
+            if name in ("RecFormat2", "RecEncoder", "RecQuality") and (before or {}).get("parameterValue") != val:
+                needs_reload = True
             await obs.try_call("SetProfileParameter", {"parameterCategory": cat, "parameterName": name,
                                                        "parameterValue": val})
-        applied: dict[str, Any] = {"output_mode": mode, "directory": (await obs.call("GetRecordDirectory")).get(
-            "recordDirectory")}
+        reloaded = False
+        if needs_reload:
+            reloaded = await self.reload_obs_profile()
+            await obs.call("SetRecordDirectory", {"recordDirectory": str(d)})
+        applied: dict[str, Any] = {"output_mode": mode, "outputs_reloaded": reloaded,
+                                   "directory": (await obs.call("GetRecordDirectory")).get("recordDirectory")}
         for cat, name, val in sets:
             r = await obs.try_call("GetProfileParameter", {"parameterCategory": cat, "parameterName": name})
             applied[f"{cat}.{name}"] = {"requested": val, "actual": r.get("parameterValue") if r else None}
         self.status["applied"] = applied
         return applied
+
+    async def reload_obs_profile(self) -> bool:
+        """Make OBS rebuild its outputs so new recording settings really apply: switch to a temporary profile and
+        back (OBS re-reads the current profile from disk). Only when no output is active. Each switch is
+        asynchronous in OBS, so every step waits for OBS to report it. Returns True if the reload completed."""
+        obs = self.ctx.obs
+        if obs.state.get("recording") or obs.state.get("streaming"):
+            self.ctx.bus.notify("warning", "Recording settings saved, but OBS only applies a new format/encoder "
+                                "after its outputs restart. Stop recording/streaming and press 'Apply to OBS' again.",
+                                "recording")
+            return False
+        tmp = "FestCast_reload_tmp"
+
+        async def wait(cond, timeout: float = 8.0) -> bool:
+            for _ in range(int(timeout / 0.25)):
+                if cond(await obs.call("GetProfileList")):
+                    return True
+                await asyncio.sleep(0.25)
+            return False
+
+        cur = (await obs.call("GetProfileList"))["currentProfileName"]
+        ok = False
+        try:
+            if tmp in (await obs.call("GetProfileList"))["profiles"]:
+                await obs.call("SetCurrentProfile", {"profileName": tmp})
+            else:
+                await obs.call("CreateProfile", {"profileName": tmp})  # OBS switches to a new profile
+            if not await wait(lambda p: p["currentProfileName"] == tmp):
+                raise ObsError("SetCurrentProfile", 0, "OBS did not switch to the temporary profile")
+        finally:
+            await obs.call("SetCurrentProfile", {"profileName": cur})
+            ok = await wait(lambda p: p["currentProfileName"] == cur)
+            if ok and tmp in (await obs.call("GetProfileList"))["profiles"]:
+                await obs.try_call("RemoveProfile", {"profileName": tmp})
+                await wait(lambda p: tmp not in p["profiles"], 4)
+        if not ok:
+            self.ctx.bus.notify("error", f"OBS did not return to profile '{cur}'. Check the Profile menu in OBS.",
+                                "recording")
+            return False
+        await obs.refresh_state()
+        log.info("OBS profile '%s' reloaded so recording settings apply", cur)
+        return True
 
     # -- control ------------------------------------------------------------------------------------------
     async def start(self) -> dict:
@@ -260,6 +312,13 @@ class RecordingService:
                         recording_status=status, file=path, actual=probe)
             r.meta = meta
         log.info("recording finalized %s (%s bytes)", path, size)
+        want = (meta.get("format_requested") or "").replace("hybrid_", "").replace("fragmented_", "")
+        got = (probe or {}).get("container") or ""
+        if probe and want and not meta.get("simulated") and not (
+                (want == "mkv" and "matroska" in got) or (want in ("mp4", "mov") and "mp4" in got)):
+            self.ctx.bus.notify("warning", f"Recording container is '{got}' but '{want}' was requested. Press "
+                                "'Apply to OBS & verify' (with recording stopped) so OBS reloads its settings.",
+                                "recording")
         if path:
             await asyncio.to_thread(self._write_metadata, Path(path).parent, meta)
         if self.config.get("auto_remux") and path and path.lower().endswith(".mkv") and status != "failed":

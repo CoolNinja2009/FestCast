@@ -286,6 +286,7 @@ class CameraService:
             await self.ctx.obs.ensure_scene(scene, "camscene", cid)
             kind, settings = self.adapter.obs_source(self.cam_dict(c), self.wrapper_url(cid))
             await self.ctx.obs.ensure_input(cam_input_name(cid), kind, settings, scene, "camera", cid)
+            await self.ctx.obs.fit_full(scene, cam_input_name(cid))
             await self.ctx.obs.call("SetInputMute", {"inputName": cam_input_name(cid),
                                                      "inputMuted": not c.audio_active})
         except ObsError as e:

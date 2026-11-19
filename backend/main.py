@@ -92,6 +92,16 @@ def main() -> None:
         os.environ["FESTCAST_DATA_DIR"] = a.data_dir
     get_settings.cache_clear()
     s = get_settings()
+    import socket
+    import sys
+
+    with socket.socket() as probe:
+        probe.settimeout(0.5)
+        if probe.connect_ex(("127.0.0.1", s.port)) == 0:
+            # On Windows a 0.0.0.0 bind can succeed while another program owns 127.0.0.1:<port>; OBS would then
+            # talk to that program instead of FestCast. Refuse to start rather than fail silently.
+            sys.exit(f"FestCast: port {s.port} is already used by another program on this PC. "
+                     f"Close it, or set FESTCAST_PORT to a free port in .env.")
     uvicorn.run(create_app(s), host=s.host, port=s.port, log_level="warning", ws_ping_interval=20)
 
 

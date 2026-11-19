@@ -55,6 +55,9 @@ class MockObsTransport:
         self.ids = itertools.count(1)
         self.calls: list[tuple[str, dict]] = []
         self.projectors: list[dict] = []
+        self.profiles = ["Untitled"]
+        self.profile_name = "Untitled"
+        self.reloads = 0
 
     @property
     def connected(self) -> bool:
@@ -256,6 +259,27 @@ class MockObsTransport:
     def r_GetProfileParameter(self, d):
         v = self.profile.get((d["parameterCategory"], d["parameterName"]))
         return {"parameterValue": v, "defaultParameterValue": None}
+    def r_GetProfileList(self, d):
+        return {"currentProfileName": self.profile_name, "profiles": list(self.profiles)}
+
+    def r_CreateProfile(self, d):
+        if d["profileName"] in self.profiles:
+            raise ObsError("CreateProfile", 601, "exists")
+        self.profiles.append(d["profileName"])
+        self.profile_name = d["profileName"]
+        self.reloads += 1
+
+    def r_SetCurrentProfile(self, d):
+        if d["profileName"] not in self.profiles:
+            raise ObsError("SetCurrentProfile", 600, "no such profile")
+        self.profile_name = d["profileName"]
+        self.reloads += 1
+
+    def r_RemoveProfile(self, d):
+        if d["profileName"] == self.profile_name:
+            raise ObsError("RemoveProfile", 505, "current profile")
+        self.profiles.remove(d["profileName"])
+
     def r_SetProfileParameter(self, d): self.profile[(d["parameterCategory"], d["parameterName"])] = d["parameterValue"]
 
     def r_GetRecordStatus(self, d):

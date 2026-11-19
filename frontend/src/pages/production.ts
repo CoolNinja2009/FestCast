@@ -65,8 +65,8 @@ function sceneButtons() {
       onclick: () => pv(s.name), ondblclick: () => go(s.name),
     }, s.name.replace(/^FC (Cam|Layout) · /, ''), h('small', null, s.name.startsWith('FC Cam') ? 'camera' : s.name.startsWith('FC Layout') ? 'layout' : s.name === 'FC Standby' ? 'standby' : 'OBS scene'))))] : [];
   return [
-    ...group('Layouts', scenes.filter(s => s.name.startsWith('FC Layout'))),
-    ...group('Cameras (full screen)', scenes.filter(s => s.name.startsWith('FC Cam'))),
+    ...group('Layouts', scenes.filter(s => s.name.startsWith('FC Layout')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))),
+    ...group('Cameras (full screen)', scenes.filter(s => s.name.startsWith('FC Cam')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))),
     ...group('Other OBS scenes (not managed by FestCast)', scenes.filter(s => !s.owned)),
     ...group('Standby', scenes.filter(s => s.name === 'FC Standby')),
   ];

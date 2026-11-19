@@ -22,11 +22,22 @@
 * Do not rename or delete the `FC_*` sources/scenes by hand; FestCast recreates missing ones on reconnect and
   never touches anything else.
 
+## Port
+
+FestCast uses port **8420** (`FESTCAST_PORT`). It refuses to start if another program already owns that port on
+127.0.0.1, because OBS's browser sources would otherwise reach that program instead of FestCast.
+
+## Real-OBS smoke test
+
+With FestCast running against OBS: `.venv\Scripts\python scripts\obs_smoke_test.py`. It checks the connection,
+camera sources, probe pages, layout transforms and records an 8-second clip that ffprobe verifies, then removes its
+test layout. It never changes your programme scene.
+
 ## Network
 
 * Phones, TVs and the PC must be on the same network. The address phones use is shown at the bottom left of the
   dashboard. If it picks the wrong adapter (VPN/VirtualBox), set `FESTCAST_PUBLIC_HOST=192.168.x.x` in `.env`.
-* Windows Firewall: allow Python on **TCP 8000** (dashboard/links) and MediaMTX on **TCP 8889 + UDP 8189**
+* Windows Firewall: allow Python on **TCP 8420** (dashboard/links) and MediaMTX on **TCP 8889 + UDP 8189**
   (TV output). Windows asks the first time; choose *Private networks*.
 * School Wi-Fi often isolates clients ("AP/client isolation"). If phones can't open the link, ask IT or use a
   dedicated router for the production.
