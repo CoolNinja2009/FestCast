@@ -1,5 +1,6 @@
 """Routes reachable without operator login:
 * /join/<token>      camera operator page (phones)
+* /cam/<token>       local camera page (phones, on the https listener): sends the camera to MediaMTX via FestCast
 * /tv/<token>        TV receiver page
 * /api/public/...    token-gated JSON for those pages
 * /obs/...           pages that run INSIDE OBS browser sources (loopback + local key only)
@@ -12,7 +13,7 @@ import hmac
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from ..security.auth import LOOPBACK, SESSION_COOKIE, SESSION_TTL
@@ -54,8 +55,52 @@ async def join_info(request: Request, token: str):
     cam, push = r
     prod = c.cameras.production()
     return JSONResponse({"camera": cam.name, "slot": cam.slot, "production": prod.name if prod else "",
-                         "quality": cam.resolution_target, "fps": prod.fps if prod else 30, "publish_url": push},
+                         "quality": cam.resolution_target, "fps": prod.fps if prod else 30, "publish_url": push,
+                         "transport": cam.transport, "https_port": c.https_port or None},
                         headers=NOSTORE)
+
+
+def sdp_response(status: int, text: str, loc: str | None) -> Response:
+    headers = dict(NOSTORE)
+    if loc:
+        headers["X-Session"] = loc
+    return Response(text, status_code=status, media_type="application/sdp" if status == 201 else "text/plain",
+                    headers=headers)
+
+
+@router.get("/cam/{token}")
+async def cam_page(request: Request, token: str):
+    c = request.app.state.ctx
+    if request.url.scheme != "https" and c.https_port:
+        # phones only open the camera on https pages
+        return RedirectResponse(f"https://{request.url.hostname}:{c.https_port}/cam/{token}", status_code=307)
+    return page(PAGES / "cam.html")
+
+
+@router.get("/api/public/cam/{token}")
+async def cam_info(request: Request, token: str):
+    c = request.app.state.ctx
+    cam = c.cameras.local_cam_for_token(token)
+    if not cam:
+        raise HTTPException(404, "This camera link is invalid, expired or was revoked. Ask the producer for a new one.")
+    d = c.cameras.cam_dict(cam)
+    from ..transports.vdoninja import RESOLUTIONS
+    w, hgt = RESOLUTIONS.get(cam.resolution_target, (1920, 1080))
+    return JSONResponse({"camera": cam.name, "slot": cam.slot, "production": (c.cameras.production() or cam).name,
+                         "width": w, "height": hgt, "fps": d["fps"], "bitrate_kbps": cam.bitrate_kbps,
+                         "enabled": cam.enabled, "reload": c.cameras.reload_nonce.get(cam.id, 0)}, headers=NOSTORE)
+
+
+@router.post("/api/public/cam/{token}/whip")
+async def cam_whip(request: Request, token: str):
+    body = (await request.body())[:200_000].decode("utf-8", errors="replace")
+    return sdp_response(*await request.app.state.ctx.cameras.phone_whip(token, body))
+
+
+@router.delete("/api/public/cam/{token}/whip")
+async def cam_whip_delete(request: Request, token: str, session: str):
+    await request.app.state.ctx.cameras.phone_whip_delete(token, session)
+    return {"ok": True}
 
 
 # -- TV receivers ------------------------------------------------------------------------------------------------------
@@ -112,9 +157,26 @@ async def obs_cam_config(request: Request, cid: str, k: str | None = None):
         cam = c.cameras.camera(cid)
     except KeyError:
         raise HTTPException(404)
-    return JSONResponse({"enabled": cam.enabled, "view_url": c.cameras.adapter.view_url(c.cameras.cam_dict(cam)),
+    return JSONResponse({"enabled": cam.enabled, "transport": cam.transport,
+                         "view_url": c.cameras.adapter.view_url(c.cameras.cam_dict(cam)) if cam.transport != "local"
+                         else None,
                          "rotation": cam.rotation or 0, "frame": cam.frame or "fit",
-                         "reload": c.cameras.reload_nonce.get(cid, 0)}, headers=NOSTORE)
+                         "reload": c.cameras.reload_nonce.get(cid, 0),
+                         "page": int((PAGES / "obs_cam.html").stat().st_mtime)}, headers=NOSTORE)
+
+
+@router.post("/obs/cam/{cid}/whep")
+async def obs_cam_whep(request: Request, cid: str, k: str | None = None):
+    obs_only(request, k)
+    body = (await request.body())[:200_000].decode("utf-8", errors="replace")
+    return sdp_response(*await request.app.state.ctx.cameras.obs_whep(cid, body))
+
+
+@router.delete("/obs/cam/{cid}/whep")
+async def obs_cam_whep_delete(request: Request, cid: str, session: str, k: str | None = None):
+    obs_only(request, k)
+    await request.app.state.ctx.cameras.obs_whep_delete(session)
+    return {"ok": True}
 
 
 @router.post("/obs/cam/{cid}/stats")

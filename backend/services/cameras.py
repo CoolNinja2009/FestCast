@@ -11,13 +11,18 @@ from typing import TYPE_CHECKING, Any
 
 from ..database.models import Camera, Invitation, Production, RetiredStream, now
 from ..obs.client import ObsError
-from ..transports.vdoninja import RESOLUTIONS, VdoNinjaInputAdapter, new_password, new_stream_id
+import httpx
+
+from ..transports.local import LocalInputAdapter, mtx_path
+from ..transports.vdoninja import RESOLUTIONS, CameraInputAdapter, VdoNinjaInputAdapter, new_password, new_stream_id
 
 if TYPE_CHECKING:
     from ..core.context import Ctx
 
 log = logging.getLogger("festcast.cameras")
 
+TRANSPORTS = ("local", "vdoninja")
+TRANSPORT_LABEL = {"local": "locally (through this PC, no internet)", "vdoninja": "through VDO.Ninja (internet)"}
 STALE_AFTER = 8.0          # seconds without a probe report -> probe offline
 NO_VIDEO_AFTER = 6.0       # probe reporting but no inbound video for this long -> disconnected
 
@@ -86,6 +91,7 @@ class CameraService:
     def __init__(self, ctx: "Ctx") -> None:
         self.ctx = ctx
         self.adapter = VdoNinjaInputAdapter(ctx.settings.vdo_base)
+        self.adapters: dict[str, CameraInputAdapter] = {"vdoninja": self.adapter, "local": LocalInputAdapter()}
         self.live: dict[str, dict] = {}       # transient runtime state per camera
         self.history: deque[dict] = deque(maxlen=300)  # connection history
         self.reload_nonce: dict[str, int] = {}
@@ -116,6 +122,9 @@ class CameraService:
                 sid = new_stream_id()
                 if not s.get(RetiredStream, sid) and not s.query(Camera).filter(Camera.stream_id == sid).first():
                     return sid
+
+    def adapter_of(self, c: Camera) -> CameraInputAdapter:
+        return self.adapters.get(c.transport or "vdoninja", self.adapter)
 
     def cam_dict(self, c: Camera, prod: Production | None = None) -> dict:
         prod = prod or self.production()
@@ -155,11 +164,13 @@ class CameraService:
         with self.ctx.db.session() as s:
             slots = [c.slot for c in s.query(Camera).filter(Camera.production_id == p.id)]
             slot = max(slots, default=0) + 1
+            transport = self.ctx.settings.camera_transport
             c = Camera(production_id=p.id, slot=slot, name=(name or f"Camera {slot}").strip()[:80],
-                       stream_id=self._unique_stream_id())
+                       stream_id=self._unique_stream_id(), transport=transport if transport in TRANSPORTS else "local")
             s.add(c)
         self.new_invitation(c.id)
-        log.info("camera added %s (%s)", c.name, c.id)
+        log.info("camera added %s (%s, %s)", c.name, c.id, c.transport)
+        await self.ensure_mtx()
         await self.sync_camera_obs(c.id)
         self.publish()
         return c
@@ -204,6 +215,10 @@ class CameraService:
                 if int(fields["rotation"]) % 360 not in (0, 90, 180, 270):
                     raise ValueError("rotation must be 0, 90, 180 or 270")
                 c.rotation = int(fields["rotation"]) % 360
+            if "transport" in fields:
+                if fields["transport"] not in TRANSPORTS:
+                    raise ValueError("transport must be local or vdoninja")
+                c.transport = fields["transport"]
             if "frame" in fields:
                 if fields["frame"] not in ("fit", "fill"):
                     raise ValueError("frame must be fit or fill")
@@ -216,17 +231,33 @@ class CameraService:
                                 "invitation link (or press Reconnect on the phone) for the new capture size to apply; "
                                 "FestCast will show the resolution actually received.", "cameras")
             self.live.setdefault(cid, {})["target_pending"] = True
-        if "bitrate_kbps" in fields or "enabled" in fields:
+        if "transport" in fields and old.transport != c.transport:
+            log.info("camera %s transport %s -> %s", c.name, old.transport, c.transport)
+            self.live.pop(cid, None)
+            await self.ensure_mtx()
+            self.ctx.bus.notify("info", f"{c.name} now connects {TRANSPORT_LABEL[c.transport]}. The phone must open "
+                                "its camera link again.", "cameras")
+        if "bitrate_kbps" in fields or "enabled" in fields or "transport" in fields:
             await self.sync_camera_obs(cid)
             self.bump_reload(cid)
+        if "transport" in fields and old.transport != c.transport:
+            await self.refresh_obs_page(cid)
         self.publish()
         return c
 
     def bump_reload(self, cid: str) -> None:
         self.reload_nonce[cid] = self.reload_nonce.get(cid, 0) + 1
 
+    async def refresh_obs_page(self, cid: str) -> None:
+        """Reload the camera's OBS browser source from scratch (its "Refresh cache of current page" button), so OBS
+        runs the current page even if it loaded an older FestCast version before."""
+        if self.ctx.obs.connected:
+            await self.ctx.obs.try_call("PressInputPropertiesButton", {"inputName": cam_input_name(cid),
+                                                                        "propertyName": "refreshnocache"})
+
     async def reconnect(self, cid: str) -> None:
         self.bump_reload(cid)
+        await self.refresh_obs_page(cid)
         self.live.setdefault(cid, {})["reconnecting"] = time.time()
         log.info("camera %s: viewer reconnect requested", cid)
         self.publish()
@@ -253,7 +284,10 @@ class CameraService:
     async def revoke(self, cid: str) -> None:
         """Revoke: the old link stops working AND the old stream id is retired, so a phone still holding the old
         VDO.Ninja URL publishes into nothing. A fresh invitation is issued."""
+        old = self.camera(cid)
         self.new_invitation(cid, rotate_stream=True)
+        if old.transport == "local":
+            await self.kick_local(mtx_path({"stream_id": old.stream_id}))
         log.info("camera %s invitation revoked; stream id rotated", cid)
         self.ctx.bus.notify("info", "Invitation revoked. Send the new link to the operator.", "cameras")
         self.publish()
@@ -276,10 +310,29 @@ class CameraService:
                 return None
             if inv.opened_at is None:
                 inv.opened_at = now()
-        return c, self.adapter.publish_url(self.cam_dict(c))
+        return c, self.publish_link(c, token)
 
-    def invite_link(self, token: str) -> str:
-        return f"{self.ctx.public_base}/join/{token}"
+    def publish_link(self, c: Camera, token: str, ip: bool = False) -> str | None:
+        """Where the phone sends video from: the local https camera page, or the VDO.Ninja push URL."""
+        if c.transport == "local":
+            return f"{self.ctx.https_base(ip)}/cam/{token}" if self.ctx.https_port else None
+        return self.adapter.publish_url(self.cam_dict(c))
+
+    def invite_link(self, token: str, ip: bool = False) -> str:
+        return f"{self.ctx.ip_base if ip else self.ctx.public_base}/join/{token}"
+
+    def direct_link(self, cid: str) -> str | None:
+        """The VDO.Ninja publish URL itself, for phones that cannot reach this PC (other network, mobile data, a
+        VPN or blocker on the phone). It skips the /join instruction page. Revoking rotates the stream id, so an old
+        direct link publishes into nothing, same as an old join link."""
+        with self.ctx.db.session() as s:
+            c = s.get(Camera, cid)
+        if not c:
+            return None
+        if c.transport == "local":
+            inv = self.invitation(cid)
+            return self.publish_link(c, inv.token, ip=True) if inv else None
+        return self.adapter.publish_url(self.cam_dict(c))
 
     # -- OBS -------------------------------------------------------------------------------------------
     def wrapper_url(self, cid: str) -> str:
@@ -292,7 +345,7 @@ class CameraService:
         scene = cam_scene_name(c.name)
         try:
             await self.ctx.obs.ensure_scene(scene, "camscene", cid)
-            kind, settings = self.adapter.obs_source(self.cam_dict(c), self.wrapper_url(cid))
+            kind, settings = self.adapter_of(c).obs_source(self.cam_dict(c), self.wrapper_url(cid))
             await self.ctx.obs.ensure_input(cam_input_name(cid), kind, settings, scene, "camera", cid)
             await self.ctx.obs.fit_full(scene, cam_input_name(cid))
             await self.ctx.obs.call("SetInputMute", {"inputName": cam_input_name(cid),
@@ -330,7 +383,15 @@ class CameraService:
         stats = payload.get("stats")
         if payload.get("event"):
             st["last_event"] = payload["event"]
-        parsed = parse_vdo_stats(stats) if stats else None
+        if isinstance(payload.get("parsed"), dict):     # local transport: the OBS page measures WebRTC itself
+            raw = payload["parsed"]
+            parsed = {k: _num(raw.get(k)) for k in parse_vdo_stats(None) if k != "codec"}
+            parsed["codec"] = raw.get("codec") if isinstance(raw.get("codec"), str) else None
+            for k in ("width", "height"):
+                parsed[k] = int(parsed[k]) if parsed[k] else None
+            stats = raw
+        else:
+            parsed = parse_vdo_stats(stats) if stats else None
         has_video = bool(parsed and (parsed["width"] or (parsed["bitrate_kbps"] or 0) > 0))
         prev_status = st.get("status")
         if has_video:
@@ -379,6 +440,101 @@ class CameraService:
     def usable_count(self) -> int:
         return sum(1 for c in self.cameras() if c.enabled and self.live.get(c.id, {}).get("status") == "live")
 
+    # -- local transport (MediaMTX) ---------------------------------------------------------------------------
+    def _mtx(self) -> tuple[str, str] | None:
+        o = self.ctx.outputs
+        if o.mtx_state != "running":
+            return None
+        return f"http://127.0.0.1:{o.ports['webrtc']}", f"http://127.0.0.1:{o.ports['api']}"
+
+    async def ensure_mtx(self) -> None:
+        """Local cameras need MediaMTX: start it (the outputs watchdog then keeps it alive)."""
+        if not any(c.transport == "local" for c in self.cameras()):
+            return
+        o = self.ctx.outputs
+        if o.mtx_state == "running" and o.want_mtx:
+            return
+        if not self.ctx.settings.mediamtx:
+            self.ctx.bus.notify("error", "Local cameras need MediaMTX, which was not found. Run "
+                                "scripts\\get-mediamtx.ps1 (see docs/SETUP.md).", "cameras")
+            return
+        try:
+            await o.start_mtx()
+        except ValueError as e:
+            self.ctx.bus.notify("error", f"Local cameras: {e}", "cameras")
+
+    async def _forward(self, method: str, url: str, body: str | None = None) -> tuple[int, str, str | None]:
+        try:
+            async with httpx.AsyncClient(timeout=10) as cl:
+                r = await cl.request(method, url, content=body.encode() if body is not None else None,
+                                     headers={"Content-Type": "application/sdp"} if body is not None else None)
+        except httpx.HTTPError as e:
+            return 502, f"MediaMTX unreachable: {e}", None
+        return r.status_code, r.text, r.headers.get("location")
+
+    def local_cam_for_token(self, token: str) -> Camera | None:
+        with self.ctx.db.session() as s:
+            inv = s.get(Invitation, token)
+            if not inv or inv.revoked_at is not None:
+                return None
+            exp = inv.expires_at if inv.expires_at.tzinfo else inv.expires_at.replace(tzinfo=timezone.utc)
+            c = s.get(Camera, inv.camera_id)
+            if exp < datetime.now(timezone.utc) or not c or c.stream_id != inv.stream_id or c.transport != "local":
+                return None
+            if inv.opened_at is None:
+                inv.opened_at = now()
+            return c
+
+    async def phone_whip(self, token: str, offer_sdp: str) -> tuple[int, str, str | None]:
+        """Forward a phone's WHIP offer to MediaMTX (invitation-checked)."""
+        c = self.local_cam_for_token(token)
+        if not c:
+            return 403, "This camera link is invalid, expired or was revoked. Ask the producer for a new one.", None
+        if not c.enabled:
+            return 409, "This camera is switched off in FestCast. Ask the producer to enable it.", None
+        await self.ensure_mtx()
+        m = self._mtx()
+        if not m:
+            return 503, "FestCast's media server (MediaMTX) is not running yet. Retrying.", None
+        path = mtx_path(self.cam_dict(c))
+        await self.kick_local(path)      # a phone re-joining replaces its own stale session
+        st, text, loc = await self._forward("POST", f"{m[0]}/{path}/whip", offer_sdp)
+        if st == 201:
+            log.info("camera %s: phone connected (local)", c.name)
+        return st, text, loc
+
+    async def phone_whip_delete(self, token: str, session: str) -> None:
+        if session.startswith("/") and self.local_cam_for_token(token) and (m := self._mtx()):
+            await self._forward("DELETE", m[0] + session)
+
+    async def obs_whep(self, cid: str, offer_sdp: str) -> tuple[int, str, str | None]:
+        c = self.camera(cid)
+        if c.transport != "local":
+            return 400, "not a local camera", None
+        m = self._mtx()
+        if not m:
+            await self.ensure_mtx()
+            return 503, "MediaMTX not running", None
+        return await self._forward("POST", f"{m[0]}/{mtx_path(self.cam_dict(c))}/whep", offer_sdp)
+
+    async def obs_whep_delete(self, session: str) -> None:
+        if session.startswith("/") and (m := self._mtx()):
+            await self._forward("DELETE", m[0] + session)
+
+    async def kick_local(self, path: str) -> None:
+        """Drop the phone publishing to this MediaMTX path (MediaMTX API: webrtcsessions list / kick)."""
+        m = self._mtx()
+        if not m:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=3) as cl:
+                items = (await cl.get(f"{m[1]}/v3/webrtcsessions/list")).json().get("items") or []
+                for x in items:
+                    if x.get("path") == path and x.get("state") == "publish":
+                        await cl.post(f"{m[1]}/v3/webrtcsessions/kick/{x['id']}")
+        except (httpx.HTTPError, ValueError):
+            pass
+
     # -- views -------------------------------------------------------------------------------------------
     def view(self, c: Camera, prod: Production | None = None) -> dict:
         st = self.live.get(c.id, {})
@@ -401,7 +557,8 @@ class CameraService:
             "audio_kbps": st.get("audio_kbps"), "codec": st.get("codec"),
             "below_target": below, "target_pending": bool(st.get("target_pending")),
             "reconnecting": bool(st.get("reconnecting")),
-            "invite": ({"link": self.invite_link(inv.token), "expires_at": inv.expires_at.isoformat(),
+            "https_ok": bool(self.ctx.https_port) if c.transport == "local" else None,
+            "invite": ({"link": self.invite_link(inv.token), "ip_link": self.invite_link(inv.token, ip=True), "expires_at": inv.expires_at.isoformat(),
                         "opened": inv.opened_at is not None} if inv else None),
         }
 

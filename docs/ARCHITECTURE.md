@@ -7,8 +7,9 @@ A modular monolith: one Python process (FastAPI + asyncio) and a static TypeScri
 | Concern | Owner | Notes |
 |---|---|---|
 | Rendering, encoding, recording, streaming | **OBS** | FestCast never encodes video. |
-| Camera transport | **VDO.Ninja** (URL push/view) | `transports/vdoninja.py` (`CameraInputAdapter`) |
+| Camera transport | **Local (MediaMTX)**, default; or **VDO.Ninja** per camera | `transports/local.py`, `transports/vdoninja.py` (`CameraInputAdapter`) |
 | Programme distribution | **MediaMTX** | OBS → WHIP → MediaMTX → WHEP → TV browser |
+| Local cameras | **MediaMTX** | phone `/cam/<token>` (https) → WHIP via FestCast → MediaMTX path `cam_<stream_id>` → WHEP → `/obs/cam/<id>` in OBS |
 | Orchestration, state, UI | **FestCast** | `backend/` + `frontend/` |
 
 ## Backend layout

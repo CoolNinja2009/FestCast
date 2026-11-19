@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     admin_password: str = ""
     # Address phones / TVs use to reach FestCast. Empty = auto-detect the LAN IP.
     public_host: str = ""
+    # Also announce this PC as <name>.local over mDNS and use that in phone/TV links (IP links stay as a fallback).
+    # Empty = off.
+    mdns_name: str = "festcast"
 
     # OBS WebSocket v5 (credentials stay server side)
     obs_host: str = "127.0.0.1"
@@ -28,6 +31,12 @@ class Settings(BaseSettings):
     obs_password: str = ""
     # simulation = in-memory mock OBS; never mixed with a real connection
     simulation: bool = False
+
+    # Camera transport for new cameras: "local" = phone -> FestCast -> MediaMTX on this PC (no internet, lowest
+    # delay); "vdoninja" = through vdo.ninja (needs internet). Each camera can be switched in the dashboard.
+    camera_transport: str = "local"
+    # HTTPS port for the local phone camera page (browsers only allow the camera on https). 0 = automatic (8443...)
+    https_port: int = 0
 
     vdo_base: str = "https://vdo.ninja/"
     invite_ttl_hours: int = 48

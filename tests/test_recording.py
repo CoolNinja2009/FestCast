@@ -19,8 +19,20 @@ def test_config_validation(env, tmp_path):
     r = env.client.put("/api/recording/config", json={"root": str(tmp_path / "r2"), "format": "mp4",
                                                        "filename": 'a<b>:c"?'})
     assert r.status_code == 200
-    assert r.json()["format"] == "mp4" and r.json()["filename"] == "abc"
+    assert r.json()["config"]["format"] == "mp4" and r.json()["config"]["filename"] == "abc"
     assert env.ctx.recording.config["root"] == str(tmp_path / "r2")
+    # saving applies to OBS straight away: OBS now writes into the new folder
+    assert env.mock.rec["dir"] == str(env.ctx.recording.day_dir()) and str(tmp_path / "r2") in env.mock.rec["dir"]
+
+
+def test_ending_production_stops_recording(env):
+    env.ctx.recording.set_config({"auto_start": True})
+    env.create_production(1)
+    assert env.client.post("/api/production/start").status_code == 200
+    assert env.ctx.recording.status["active"] is True          # auto_start on by default
+    assert env.client.post("/api/production/end").status_code == 200
+    wait_for(lambda: env.ctx.recording.status["active"] is False)
+    assert _history(env)[0]["status"] == "finished"
 
 
 def test_start_stop_history_and_metadata(env):

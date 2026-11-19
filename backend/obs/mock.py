@@ -205,6 +205,8 @@ class MockObsTransport:
 
     def r_SetInputSettings(self, d): self._inp(d)["settings"].update(d["inputSettings"])
     def r_GetInputSettings(self, d): return {"inputSettings": self._inp(d)["settings"], "inputKind": self._inp(d)["kind"]}
+    def r_PressInputPropertiesButton(self, d):
+        self._inp(d).setdefault("pressed", []).append(d["propertyName"])
     def r_GetInputMute(self, d): return {"inputMuted": self._inp(d)["muted"]}
     def r_SetInputMute(self, d): self._inp(d)["muted"] = d["inputMuted"]
     def r_GetInputVolume(self, d): return {"inputVolumeMul": self._inp(d)["vol"], "inputVolumeDb": 0.0}

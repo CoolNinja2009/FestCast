@@ -8,6 +8,8 @@ if not exist .venv\Scripts\python.exe (
   .venv\Scripts\python -m pip install --upgrade pip >nul
   .venv\Scripts\python -m pip install -r requirements.txt || (echo Dependency install failed & pause & exit /b 1)
 )
+rem packages added after the first install (cryptography: https camera page)
+.venv\Scripts\python -c "import cryptography, zeroconf" 2>nul || .venv\Scripts\python -m pip install -r requirements.txt
 if not exist frontend\dist\index.html (
   where npm >nul 2>nul || (echo Node.js is required to build the dashboard once. & pause & exit /b 1)
   echo [FestCast] Building dashboard...

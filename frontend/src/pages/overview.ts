@@ -1,4 +1,4 @@
-import { act, api, bytes, clock, copy, dash, disposers, dur, h, kbps, live, n, pill, previewImg, spark, store } from '../lib';
+import { act, api, bytes, clock, confirmBox, copy, dash, disposers, dur, h, kbps, live, n, pill, previewImg, spark, store } from '../lib';
 import { createProductionDialog, showQr } from './cameras';
 
 function stat(label: string, value: any, sub?: any, cls = '') {
@@ -12,7 +12,7 @@ export function overviewPage(el: HTMLElement) {
   disposers.push(store.on('metrics', (m) => { if (m) { hist.push({ ts: m.ts, cpu: m.system.cpu_pct, ram: m.system.ram_pct, gpu: m.system.gpu?.util_pct, enc: m.system.gpu?.encoder_pct, cam_in: m.cameras.in_kbps, rx: m.system.net_rx_kbps, tx: m.system.net_tx_kbps }); hist = hist.slice(-300); } }));
 
   el.append(
-    h('div.page-h', null, h('h1', null, 'Overview'), h('span.sub', null, 'Live state of every subsystem')),
+    h('div.page-h', null, h('h1', null, 'Overview')),
     live(h('div'), ['cameras', 'obs', 'production', 'server'], banners),
     live(h('div.grid.g4'), ['metrics', 'cameras', 'obs', 'recording', 'outputs', 'production'], tiles),
     live(h('div'), ['cameras'], cameraLinks),
@@ -24,7 +24,7 @@ export function overviewPage(el: HTMLElement) {
         h('button.btn.ghost.sm.right', { onclick: () => act(() => api('POST', '/api/notifications/clear')).then(() => store.set('notifications', [])) }, 'Clear')),
         live(h('div.notes'), ['notifications'], () => {
           const ns = store.get('notifications') || [];
-          if (!ns.length) return h('div.note', null, h('span.m.dim', null, 'Nothing to report.'));
+          if (!ns.length) return h('div.note', null, h('span.m.faint', null, 'No notifications'));
           return ns.slice(0, 60).map((x: any) => h('div.note', { class: x.level }, h('span.t', null, clock(x.ts)), h('span.m', null, x.message)));
         }))),
     h('div.panel', { style: { marginTop: '14px' } }, h('div.ph', null, h('h2', null, 'Last 10 minutes')),
@@ -44,9 +44,9 @@ function banners() {
   const obs = store.get('obs') || {};
   const server = store.get('server') || {};
   const out: any[] = [];
-  if (server.simulation) out.push(h('div.banner.warn', null, h('b', null, 'Simulation mode.'), 'OBS is an in-memory simulator. No camera, programme or recording shown here is real.'));
+  if (server.simulation) out.push(h('div.banner.warn', null, h('b', null, 'Simulation'), 'Nothing shown here is real.'));
   if (!obs.connected) out.push(h('div.banner.bad', null, h('b', null, 'OBS not connected.'), obs.error || '', h('a.right', { href: '#/settings' }, 'How to connect')));
-  if (!(store.get('cameras') || {}).production) out.push(h('div.banner.info', null, 'No production yet. Create one to generate the camera room and invitation links.',
+  if (!(store.get('cameras') || {}).production) out.push(h('div.banner.info', null, 'No production yet.',
     h('button.btn.primary.sm.right', { onclick: createProductionDialog }, 'Create production')));
   return out;
 }
@@ -84,7 +84,12 @@ function quickActions() {
   const prod = (store.get('cameras') || {}).production;
   if (!prod) return h('button.btn.primary', { onclick: createProductionDialog }, 'Create production');
   return [
-    p.started ? h('button.btn', { onclick: () => act(() => api('POST', '/api/production/end'), 'Production ended') }, 'End production')
+    p.started ? h('button.btn', { onclick: async () => {
+      const rec = store.get('recording') || {};
+      const stops = rec.active && rec.config?.auto_start;
+      if (await confirmBox('End production', stops ? 'End the production? The recording stops too.' : 'End the production?', 'End production'))
+        act(() => api('POST', '/api/production/end'), stops ? 'Production ended, recording stopped' : 'Production ended');
+    } }, 'End production')
       : h('button.btn.green', { onclick: () => act(() => api('POST', '/api/production/start'), 'Production started') }, 'Start production'),
     h('a.btn', { href: '#/cameras' }, 'Cameras'), h('a.btn', { href: '#/production' }, 'Switcher & layouts'), h('a.btn', { href: '#/recordings' }, 'Recording'),
   ];
@@ -95,13 +100,15 @@ function cameraLinks() {
   const cams = s.cameras || [];
   if (!s.production || !cams.length) return null;
   return h('div.panel', { style: { marginTop: '14px' } },
-    h('div.ph', null, h('h2', null, 'Camera links'), h('span.small.dim', null, 'send one link to each camera operator'),
+    h('div.ph', null, h('h2', null, 'Camera links'),
       h('a.btn.sm.right', { href: '#/cameras' }, 'All camera controls')),
     h('table.t', null, cams.map((c: any) => h('tr', null,
       h('td', { style: { width: '150px' } }, h('b', null, c.name)),
       h('td', { style: { width: '170px' } }, pill(c.status)),
-      h('td.mono.small', { style: { wordBreak: 'break-all' } }, c.invite ? c.invite.link : '—'),
+      h('td.mono.small', { style: { wordBreak: 'break-all' } }, c.invite ? c.invite.link : '—',
+        c.invite && c.invite.ip_link && c.invite.ip_link !== c.invite.link ? h('div.dim', { title: 'Same link by IP, for devices that cannot open .local names' }, c.invite.ip_link) : null),
       h('td', { style: { textAlign: 'right', whiteSpace: 'nowrap' } },
         c.invite ? [h('button.btn.sm', { onclick: () => copy(c.invite.link, `${c.name} link`) }, 'Copy'),
-          h('button.btn.sm', { onclick: () => showQr(c.id, c.name) }, 'QR')] : null)))));
+          h('button.btn.sm', { onclick: () => showQr(c.id, c.name), title: 'QR for the PC link (festival Wi-Fi)' }, 'QR'),
+          h('button.btn.sm', { onclick: () => showQr(c.id, c.name, true), title: 'QR straight to VDO.Ninja: works on any network' }, 'Direct QR')] : null)))));
 }

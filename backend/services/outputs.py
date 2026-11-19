@@ -55,7 +55,7 @@ class OutputService:
         if kind not in ("webrtc", "hdmi"):
             raise ValueError("kind must be webrtc or hdmi")
         with self.ctx.db.session() as s:
-            r = Receiver(name=(name or "TV").strip()[:80], kind=kind, token=secrets.token_urlsafe(18),
+            r = Receiver(name=(name or "TV").strip()[:80], kind=kind, token=self._short_code(s),
                          monitor_index=monitor_index)
             s.add(r)
         log.info("receiver added %s (%s)", r.name, kind)
@@ -81,9 +81,20 @@ class OutputService:
         log.info("receiver %s revoked", rid)
         self.publish()
 
+    # TV links are typed on a TV remote, so the code is short and has no look-alike characters (0/o, 1/l/i).
+    CODE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+
+    def _short_code(self, s, length: int = 6) -> str:
+        while True:
+            code = "".join(secrets.choice(self.CODE_ALPHABET) for _ in range(length))
+            if not s.query(Receiver).filter(Receiver.token == code).first():
+                return code
+
     def by_token(self, token: str) -> Receiver | None:
         with self.ctx.db.session() as s:
             r = s.query(Receiver).filter(Receiver.token == token).first()
+            if not r and token != token.strip().lower():  # TV keyboards like to capitalise
+                r = s.query(Receiver).filter(Receiver.token == token.strip().lower()).first()
             return r if r and not r.revoked else None
 
     async def whep(self, token: str, offer_sdp: str) -> tuple[int, str, str | None]:
@@ -127,8 +138,8 @@ class OutputService:
                 st["failures"] = st.get("failures", 0) + 1
         return True
 
-    def link(self, r: Receiver) -> str:
-        return f"{self.ctx.public_base}/tv/{r.token}"
+    def link(self, r: Receiver, ip: bool = False) -> str:
+        return f"{self.ctx.ip_base if ip else self.ctx.public_base}/tv/{r.token}"
 
     # -- MediaMTX ---------------------------------------------------------------------------------------
     def mtx_config(self) -> str:
@@ -491,7 +502,8 @@ paths:
             st = self.live.get(r.id, {})
             online = bool(st.get("last_seen") and t - st["last_seen"] < 10)
             recs.append({"id": r.id, "name": r.name, "kind": r.kind, "monitor_index": r.monitor_index,
-                         "link": self.link(r) if r.kind == "webrtc" else None, "online": online,
+                         "link": self.link(r) if r.kind == "webrtc" else None,
+                         "ip_link": self.link(r, ip=True) if r.kind == "webrtc" else None, "online": online,
                          "state": (st.get("state") if online else ("offline" if st else "never_connected")),
                          **{k: st.get(k) for k in ("width", "height", "fps", "bitrate_kbps", "jitter_ms",
                                                    "packets_lost", "rtt_ms", "error", "last_seen", "failures")}})

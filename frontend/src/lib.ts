@@ -123,7 +123,10 @@ store.on('previews', (p: Record<string, string>) => {
 export function previewImg(key: string, emptyText = 'No picture') {
   const p = (store.get('previews') || {})[key];
   return [h('img', { 'data-preview': key, src: p || '', class: p ? '' : 'hidden', alt: '' }),
-          h('div.none', { class: p ? 'hidden' : '' }, emptyText)];
+          h('div.none', { class: p ? 'hidden' : '' }, emptyText),
+          // these are small OBS screenshots every ~1.5 s (cheap for OBS), so they look choppy and soft by design
+          h('span.snap', { title: 'Small snapshot from OBS every ~1.5 s, so it looks choppy and soft. The real feed '
+            + '(OBS, TV output, recording) is full quality: see the resolution and FPS figures.' }, 'Snapshot · not live')];
 }
 
 // ------------------------------------------------------------------------------------------- UI bits

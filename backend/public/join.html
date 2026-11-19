@@ -23,21 +23,29 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 fetch('/api/public/join/' + encodeURIComponent(token), {cache: 'no-store'}).then(async r => {
   const j = await r.json();
   if (!r.ok) { el.innerHTML = `<h1>Link not valid</h1><p class="err">${esc(j.detail || 'Error')}</p>`; return; }
+  const local = j.transport === 'local';
+  const target = local ? (j.https_port ? `https://${location.hostname}:${j.https_port}/cam/${encodeURIComponent(token)}` : null) : j.publish_url;
+  const steps = local ? `
+      <li>Use <b>Chrome</b> (Android) or <b>Safari</b> (iPhone). Stay on the festival Wi-Fi.</li>
+      <li>Hold the phone <b>sideways (landscape)</b>. <b>iPhone:</b> turn <b>Portrait Orientation Lock off</b> in Control Center first. (Android: turn Auto-rotate on.)</li>
+      <li>Plug into a power bank and keep this page in front: phones pause the camera when the screen locks or you switch apps.</li>
+      <li><b>Security warning, first time only:</b> the next page is FestCast on this network, with its own certificate. Chrome: tap <b>Advanced</b> → <b>Proceed</b>. Safari: tap <b>Show Details</b> → <b>visit this website</b>.</li>
+      <li>Allow the camera, check the picture, press <b>Start</b>. Leave the mic off unless the producer asked for it.</li>` : `
+      <li>Use <b>Safari</b> (iPhone) or <b>Chrome</b> (Android). Stay on the festival Wi-Fi.</li>
+      <li>Hold the phone <b>sideways (landscape)</b>. <b>iPhone:</b> open Control Center and turn <b>Portrait Orientation Lock off</b> first, otherwise the picture arrives sideways. (Android: turn Auto-rotate on.)</li>
+      <li>Plug into a power bank, turn <b>auto-lock / screen timeout off</b>, and keep this page in front: phones pause the camera when the screen locks or you switch apps.</li>
+      <li>On the next page: allow camera access, choose the <b>rear camera</b> (you can switch there), check the preview, then press <b>Start</b>.</li>
+      <li>Microphone: only choose one if the producer asked you to; otherwise pick "no audio".</li>`;
   el.innerHTML = `
     <h1>${esc(j.camera)}</h1><p class="sub">${esc(j.production)} · camera slot ${j.slot}</p>
     <div class="card">
       <div class="row"><span>You are operating</span><b>${esc(j.camera)}</b></div>
       <div class="row"><span>Requested quality</span><span class="tag">${esc(j.quality)} · ${j.fps} fps</span></div>
     </div>
-    <div class="card"><b>Before you start</b><ol>
-      <li>Use <b>Safari</b> (iPhone) or <b>Chrome</b> (Android). Stay on the festival Wi-Fi.</li>
-      <li>Hold the phone <b>sideways (landscape)</b>. <b>iPhone:</b> open Control Center and turn <b>Portrait Orientation Lock off</b> first, otherwise the picture arrives sideways. (Android: turn Auto-rotate on.)</li>
-      <li>Plug into a power bank, turn <b>auto-lock / screen timeout off</b>, and keep this page in front: phones pause the camera when the screen locks or you switch apps.</li>
-      <li>On the next page: allow camera access, choose the <b>rear camera</b> (you can switch there), check the preview, then press <b>Start</b>.</li>
-      <li>Microphone: only choose one if the producer asked you to; otherwise pick "no audio".</li>
+    <div class="card"><b>Before you start</b><ol>${steps}
     </ol></div>
     <button id="go">Open camera</button>
-    <p class="sub" style="margin-top:14px">To stop broadcasting, press <b>Hang up</b> on the camera page or close the tab. To restart, open this link again.</p>`;
-  document.getElementById('go').onclick = () => { location.href = j.publish_url; };
+    <p class="sub" style="margin-top:14px">To stop broadcasting, press <b>${local ? 'Stop' : 'Hang up'}</b> on the camera page or close the tab. To restart, open this link again.</p>`;
+  document.getElementById('go').onclick = () => { if (target) location.href = target; else alert('The local camera page is not available on this FestCast. Ask the producer.'); };
 }).catch(() => { el.innerHTML = '<h1>Cannot reach FestCast</h1><p class="err">Make sure you are on the festival Wi-Fi, then reload.</p>'; });
 </script></body></html>

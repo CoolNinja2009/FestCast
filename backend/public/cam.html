@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex"><title>FestCast camera</title>
+<style>
+:root{--bg:#0e1013;--panel:#171a1f;--line:#262a31;--text:#e8eaed;--dim:#9aa0a8;--accent:#e5484d;--ok:#3fb950;--warn:#d29922}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:#000;color:var(--text);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+#top{position:fixed;left:0;right:0;top:0;padding:max(10px,env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:10px;background:linear-gradient(#000c,#0000)}
+#name{font-weight:700;font-size:17px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#badge{padding:5px 11px;border-radius:999px;font-weight:700;font-size:13px;background:#333}
+#badge.live{background:var(--accent)}#badge.wait{background:var(--warn);color:#000}
+#stats{position:fixed;left:14px;top:calc(max(10px,env(safe-area-inset-top)) + 40px);font:12px ui-monospace,monospace;color:#cfd3d8;background:#0008;padding:4px 8px;border-radius:6px}
+#bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px max(14px,env(safe-area-inset-bottom));display:flex;gap:10px;background:linear-gradient(#0000,#000c)}
+button{flex:1;padding:16px 10px;font-size:17px;font-weight:650;border:0;border-radius:12px;background:#2a2f37;color:#fff}
+button.go{background:var(--accent)}button:disabled{opacity:.45}
+#msg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(92vw,520px);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+#msg h1{font-size:22px;margin:0 0 8px}#msg p{margin:6px 0;color:var(--dim)}#msg.hide{display:none}
+#msg b{color:var(--text)}.err{color:#ff8a8a!important}
+</style></head><body>
+<video id="v" autoplay playsinline muted></video>
+<div id="top"><span id="name">FestCast camera</span><span id="badge">OFF</span></div>
+<div id="stats" hidden></div>
+<div id="msg"><h1>Loading…</h1></div>
+<div id="bar" hidden>
+  <button id="flip">Switch camera</button>
+  <button id="mic">Mic: off</button>
+  <button id="go" class="go">Start</button>
+</div>
+<script>
+// Local FestCast camera: sends this phone's camera straight to the production PC over the venue network
+// (WebRTC WHIP; FestCast checks this link's token and hands the offer to MediaMTX). No internet involved.
+const token = location.pathname.split('/').pop();
+const base = '/api/public/cam/' + encodeURIComponent(token);
+const $ = id => document.getElementById(id);
+const v = $('v'), msg = $('msg'), badge = $('badge');
+let info = null, stream = null, pc = null, session = null, want = false, retry = null, facing = 'environment';
+let micOn = false, wake = null, reloadSeen = null, lastOut = null, statsTimer = null;
+
+function show(title, text, err) {
+  msg.innerHTML = `<h1>${title}</h1>` + (text ? `<p class="${err ? 'err' : ''}">${text}</p>` : '');
+  msg.classList.remove('hide');
+}
+function hideMsg() { msg.classList.add('hide'); }
+function setBadge(t, cls) { badge.textContent = t; badge.className = cls || ''; }
+
+async function getCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: {facingMode: {ideal: facing}, width: {ideal: info.width}, height: {ideal: info.height},
+            frameRate: {ideal: info.fps, max: info.fps}},
+    audio: micOn ? {echoCancellation: false, noiseSuppression: false, autoGainControl: false} : false});
+  v.srcObject = stream;
+  stream.getVideoTracks()[0].addEventListener('ended', () => { if (want) restart('camera stopped'); });
+}
+
+function preferH264(tr) {
+  // phones encode H.264 in hardware: smoother and cooler than software VP8
+  try {
+    const caps = RTCRtpSender.getCapabilities('video').codecs;
+    const h = caps.filter(c => /h264/i.test(c.mimeType)), rest = caps.filter(c => !/h264/i.test(c.mimeType));
+    if (h.length && tr.setCodecPreferences) tr.setCodecPreferences([...h, ...rest]);
+  } catch (e) {}
+}
+function waitIce(pc) { return new Promise(res => { if (pc.iceGatheringState === 'complete') return res();
+  const t = setTimeout(res, 2000); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); }); }
+
+async function hangup() {
+  clearTimeout(retry);
+  if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+  if (session) { fetch(base + '/whip?session=' + encodeURIComponent(session), {method: 'DELETE'}).catch(() => {}); session = null; }
+}
+function again(ms) { clearTimeout(retry); if (want) retry = setTimeout(connect, ms); }
+function restart(why) { setBadge('RECONNECTING', 'wait'); again(500); }
+
+async function connect() {
+  await hangup();
+  if (!want) return;
+  setBadge('CONNECTING', 'wait');
+  try {
+    if (!stream || stream.getVideoTracks().every(t => t.readyState === 'ended')) await getCamera();
+    pc = new RTCPeerConnection({iceServers: []});
+    const vt = stream.getVideoTracks()[0];
+    const tr = pc.addTransceiver(vt, {direction: 'sendonly', streams: [stream],
+      sendEncodings: [{maxBitrate: info.bitrate_kbps * 1000, maxFramerate: info.fps}]});
+    preferH264(tr);
+    const at = stream.getAudioTracks()[0];
+    if (at) pc.addTransceiver(at, {direction: 'sendonly', streams: [stream]});
+    pc.onconnectionstatechange = () => {
+      const s = pc && pc.connectionState;
+      if (s === 'connected') { setBadge('LIVE', 'live'); hideMsg(); }
+      if (s === 'failed' || s === 'disconnected') { setBadge('RECONNECTING', 'wait'); again(1500); }
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitIce(pc);
+    const r = await fetch(base + '/whip', {method: 'POST', headers: {'Content-Type': 'application/sdp'}, body: pc.localDescription.sdp});
+    if (r.status === 403) { want = false; await hangup(); setBadge('OFF'); show('Link not valid', await r.text(), true); return; }
+    if (r.status !== 201) { setBadge('WAITING', 'wait'); show('Waiting for FestCast', (await r.text()).slice(0, 200)); return again(3000); }
+    session = r.headers.get('X-Session');
+    await pc.setRemoteDescription({type: 'answer', sdp: await r.text()});
+    try {   // keep the resolution; let the frame rate give way first if the Wi-Fi gets tight
+      const snd = tr.sender, p = snd.getParameters();
+      p.degradationPreference = 'balanced';
+      if (p.encodings && p.encodings[0]) { p.encodings[0].maxBitrate = info.bitrate_kbps * 1000; p.encodings[0].maxFramerate = info.fps; }
+      await snd.setParameters(p);
+    } catch (e) {}
+  } catch (e) {
+    setBadge('ERROR', 'wait');
+    const t = String(e && e.name || e);
+    if (/NotAllowed/.test(t)) { want = false; show('Camera blocked', 'Allow camera access for this page (browser settings → site settings → camera), then reload.', true); return; }
+    if (!window.isSecureContext || !navigator.mediaDevices) { want = false; show('Open the secure page', 'This page must be opened over https. Open the camera link from the producer again.', true); return; }
+    show('Connection problem', String(e).slice(0, 200), true);
+    again(3000);
+  }
+}
+
+async function stats() {
+  if (!pc) { $('stats').hidden = true; return; }
+  try {
+    const rep = await pc.getStats(); let out = null;
+    rep.forEach(s => { if (s.type === 'outbound-rtp' && s.kind === 'video') out = s; });
+    if (!out) return;
+    const now = performance.now();
+    const kbps = lastOut ? Math.round((out.bytesSent - lastOut.b) * 8 / (now - lastOut.t)) : null;
+    lastOut = {b: out.bytesSent, t: now};
+    const lim = out.qualityLimitationReason && out.qualityLimitationReason !== 'none' ? ` · limited by ${out.qualityLimitationReason}` : '';
+    $('stats').textContent = `${out.frameWidth || '?'}×${out.frameHeight || '?'} · ${Math.round(out.framesPerSecond || 0)} fps · ${kbps ?? '…'} kbps${lim}`;
+    $('stats').hidden = false;
+  } catch (e) {}
+}
+
+async function lockScreenOn() {
+  try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  lockScreenOn();
+  // phones stop the camera in the background: get it back and reconnect
+  if (want && (!stream || stream.getVideoTracks().every(t => t.readyState === 'ended' || t.muted))) { stream = null; restart('back'); }
+});
+
+$('go').onclick = async () => {
+  if (want) {
+    want = false; await hangup(); setBadge('OFF'); $('go').textContent = 'Start'; $('go').className = 'go';
+    show('Stopped', 'Press Start to send this camera again.');
+    return;
+  }
+  want = true; $('go').textContent = 'Stop'; $('go').className = '';
+  lockScreenOn();
+  connect();
+};
+$('flip').onclick = async () => {
+  facing = facing === 'environment' ? 'user' : 'environment';
+  try {
+    await getCamera();
+    if (pc) {
+      const s = pc.getSenders().find(x => x.track && x.track.kind === 'video') || pc.getSenders()[0];
+      if (s) await s.replaceTrack(stream.getVideoTracks()[0]);
+      if (micOn) restart('mic');
+    }
+  } catch (e) { show('Camera problem', String(e).slice(0, 200), true); }
+};
+$('mic').onclick = async () => {
+  micOn = !micOn; $('mic').textContent = 'Mic: ' + (micOn ? 'on' : 'off');
+  try { await getCamera(); if (want) restart('mic'); } catch (e) { show('Microphone problem', String(e).slice(0, 200), true); }
+};
+
+async function poll() {
+  try {
+    const r = await fetch(base, {cache: 'no-store'});
+    if (r.status === 404) { want = false; await hangup(); setBadge('OFF'); show('Link not valid', (await r.json()).detail, true); return; }
+    const j = await r.json();
+    const changed = reloadSeen !== null && j.reload !== reloadSeen;
+    reloadSeen = j.reload;
+    if (changed) { info = j; if (want) { stream = null; restart('settings'); } }
+  } catch (e) {}
+}
+
+(async () => {
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    show('Open the secure page', 'This page needs https. Open the camera link from the producer again.', true); return;
+  }
+  try {
+    const r = await fetch(base, {cache: 'no-store'});
+    const j = await r.json();
+    if (!r.ok) { show('Link not valid', j.detail || 'Error', true); return; }
+    info = j; reloadSeen = j.reload;
+    document.title = 'FestCast · ' + j.camera;
+    $('name').textContent = j.camera;
+    $('bar').hidden = false;
+    show(j.camera, `<b>Hold the phone sideways.</b> Keep this page open and the screen on. Press <b>Start</b> below. ` +
+      `Quality: ${j.height}p · ${j.fps} fps.`);
+    try { await getCamera(); } catch (e) {
+      show('Camera blocked', 'Allow camera access for this page, then reload. (' + String(e && e.name || e) + ')', true);
+    }
+  } catch (e) { show('Cannot reach FestCast', 'Make sure you are on the festival Wi-Fi, then reload.', true); }
+  setInterval(poll, 5000);
+  setInterval(stats, 2000);
+})();
+</script></body></html>

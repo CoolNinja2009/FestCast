@@ -1,6 +1,7 @@
 """FestCast entry point: `python -m backend.main` (or start.bat)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,7 +18,7 @@ from .security.auth import Auth
 
 log = logging.getLogger("festcast")
 DIST = ROOT / "frontend" / "dist"
-OPEN_PREFIXES = ("/join/", "/tv/", "/api/public/", "/obs/", "/api/auth/", "/assets/", "/favicon")
+OPEN_PREFIXES = ("/join/", "/cam/", "/tv/", "/api/public/", "/obs/", "/api/auth/", "/assets/", "/favicon")
 
 
 def create_app(settings: Settings | None = None, ctx: Ctx | None = None) -> FastAPI:
@@ -103,13 +104,43 @@ def main() -> None:
         print(f"FestCast: port {wanted} is busy (another program); using {s.port} instead.", flush=True)
     P.remember(s.data_dir, port=s.port)
     host = s.public_host or lan_ip()
+    from .core.tls import ensure_cert
+    tls = ensure_cert(s.data_dir, [host], [f"{s.mdns_name}.local"] if s.mdns_name else [])
+    if tls:
+        hwanted = s.https_port or None
+        s.https_port = P.pick([hwanted, P.remembered(s.data_dir).get("https_port"), 8443],
+                              range(8444, 8544), avoid={s.port})
+        P.remember(s.data_dir, https_port=s.https_port)
+    else:
+        s.https_port = 0
     local_url = f"http://localhost:{s.port}"
-    print(f"\n  FestCast dashboard:  {local_url}\n  Phones / TVs reach:  http://{host}:{s.port}\n", flush=True)
+    alt = f"\n                       http://{s.mdns_name}.local:{s.port}  (name, via mDNS)" if s.mdns_name else ""
+    cam = f"\n  Local camera page:   https://{host}:{s.https_port}  (phones confirm the certificate once)" if tls else ""
+    print(f"\n  FestCast dashboard:  {local_url}\n  Phones / TVs reach:  http://{host}:{s.port}{alt}{cam}\n",
+          flush=True)
     if a.open:
         import threading
         import webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(local_url)).start()
-    uvicorn.run(create_app(s), host=s.host, port=s.port, log_level="warning", ws_ping_interval=20)
+    app = create_app(s)
+    servers = [uvicorn.Server(uvicorn.Config(app, host=s.host, port=s.port, log_level="warning",
+                                             ws_ping_interval=20))]
+    if tls:
+        # second listener, same app, for the phone camera page (getUserMedia needs https). Lifespan runs once.
+        servers.append(uvicorn.Server(uvicorn.Config(app, host=s.host, port=s.https_port, log_level="warning",
+                                                     ssl_certfile=tls[0], ssl_keyfile=tls[1], lifespan="off",
+                                                     ws_ping_interval=20)))
+
+    async def serve() -> None:
+        tasks = [asyncio.create_task(x.serve()) for x in servers]
+        try:
+            await tasks[0]     # the dashboard listener decides; if the https one ever fails, the rest keeps going
+        finally:
+            for x in servers:
+                x.should_exit = True
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run(serve())
 
 
 if __name__ == "__main__":

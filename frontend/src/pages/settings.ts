@@ -12,7 +12,7 @@ export function settingsPage(el: HTMLElement) {
   };
   load();
   el.append(
-    h('div.page-h', null, h('h1', null, 'Settings'), h('span.sub', null, 'Connections, backup and diagnostics')),
+    h('div.page-h', null, h('h1', null, 'Settings')),
     h('div.grid.g2', null,
       live(h('div.panel'), ['obs', 'server'], () => {
         const o = store.get('obs') || {};
@@ -26,15 +26,13 @@ export function settingsPage(el: HTMLElement) {
             h('ol.small.dim', { style: { margin: 0, paddingLeft: '18px' } },
               h('li', null, 'In OBS: Tools → WebSocket Server Settings → Enable WebSocket server, port 4455, enable authentication, copy the password.'),
               h('li', null, 'Put it in FestCast\'s .env file as FESTCAST_OBS_PASSWORD=… (it never leaves this PC).'),
-              h('li', null, 'Restart FestCast. It reconnects to OBS automatically whenever OBS restarts.')),
-            h('p.small.dim', null, 'Set the OBS canvas to 1920×1080 at 30 fps (Settings → Video) to match the production.'))];
+              h('li', null, 'Restart FestCast. It reconnects to OBS automatically whenever OBS restarts.')))];
       }),
       live(h('div.panel'), ['server'], () => {
         const s = store.get('server') || {};
         return [h('div.ph', null, h('h2', null, 'Access')), h('div.pb.col', null,
           h('dl.kv', null, h('dt', null, 'Phones/TVs use'), h('dd', null, s.public_base), h('dt', null, 'This device'), h('dd', null, s.local ? 'production PC (full control)' : 'remote operator'),
             h('dt', null, 'Remote control'), h('dd', null, s.remote_access ? 'enabled (password)' : 'disabled')),
-          h('p.small.dim', null, 'Camera and TV links are random, revocable tokens and never grant control. Remote operators need FESTCAST_ADMIN_PASSWORD. OBS WebSocket stays on this PC.'),
           !s.local ? h('button.btn.sm', { onclick: () => act(() => api('POST', '/api/auth/logout')).then(() => location.reload()) }, 'Sign out') : null)];
       })),
     h('div.grid.g2', { style: { marginTop: '14px' } },
@@ -43,7 +41,6 @@ export function settingsPage(el: HTMLElement) {
           h('button.btn', { onclick: () => download('/api/config/export') }, 'Export configuration'),
           h('button.btn', { onclick: async () => { const [f] = await pickFile('.json'); if (!f) return; const fd = new FormData(); fd.append('file', f); act(() => api('POST', '/api/config/import', fd), 'Configuration imported'); } }, 'Import configuration'),
           h('button.btn', { onclick: () => download('/api/diagnostics') }, 'Download support bundle')),
-        h('p.small.dim', null, 'Export holds layouts, recording and standby settings. The support bundle contains logs and state with stream IDs, invitation/receiver tokens and passwords removed.'),
         h('b.small', null, 'Health checks'), health)),
       h('div.panel', null, h('div.ph', null, h('h2', null, 'Log'), h('button.btn.sm.right', { onclick: load }, 'Refresh')), logs)),
   );

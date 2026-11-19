@@ -2,7 +2,7 @@
 <html><head><meta charset="utf-8"><title>FestCast camera probe</title>
 <style>
 html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
-iframe{position:absolute;border:0;transform-origin:50% 50%}
+iframe,video{position:absolute;border:0;transform-origin:50% 50%}video{object-fit:fill;background:transparent}
 </style>
 </head><body>
 <script>
@@ -10,6 +10,8 @@ iframe{position:absolute;border:0;transform-origin:50% 50%}
 // (VDO.Ninja IFRAME API: postMessage({getStats:true}) -> {stats:{inbound:{...}}}) back to FestCast, and corrects
 // the picture: the iframe is sized to the video's real aspect ratio (from those stats) and rotated/fitted here,
 // so a sideways or portrait phone feed fills the 16:9 frame without baked-in black bars.
+// Local cameras (transport "local") play straight from MediaMTX on this PC instead (WebRTC WHEP via FestCast),
+// measured with getStats here.
 const cid = location.pathname.split('/')[3];
 const k = new URLSearchParams(location.search).get('k');
 const q = `?k=${encodeURIComponent(k)}`;
@@ -17,6 +19,8 @@ let frame = null, viewUrl = null, reload = null, enabled = true;
 let rotation = 0, fitMode = 'fit', vw = 16, vh = 9;
 let stats = null, statsAt = 0, lastEvent = null;
 let lastVideoAt = 0, mountedAt = 0, selfHeals = 0;
+let pageVersion = null;
+let transport = null, pc = null, session = null, retry = null, lastIn = null, parsed = null;
 
 function layout() {
   if (!frame) return;
@@ -34,9 +38,81 @@ function setPicture(r, f) {
   r = Number(r) || 0; f = f === 'fill' ? 'fill' : 'fit';
   if (r !== rotation || f !== fitMode) { rotation = r; fitMode = f; layout(); }
 }
+function closeLocal() {
+  clearTimeout(retry);
+  if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+  if (session) { fetch(`/obs/cam/${cid}/whep${q}&session=${encodeURIComponent(session)}`, {method: 'DELETE'}).catch(() => {}); session = null; }
+  lastIn = null; parsed = null;
+}
+function waitIce(pc) { return new Promise(res => { if (pc.iceGatheringState === 'complete') return res();
+  const t = setTimeout(res, 1500); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); }); }
+function localAgain(ms) { clearTimeout(retry); retry = setTimeout(localConnect, ms); }
+async function localConnect() {
+  closeLocal();
+  if (!frame || transport !== 'local' || !enabled) return;
+  const me = frame;
+  try {
+    const mine = pc = new RTCPeerConnection({iceServers: []});
+    pc.addTransceiver('video', {direction: 'recvonly'});
+    pc.addTransceiver('audio', {direction: 'recvonly'});
+    pc.ontrack = e => {
+      try { e.receiver.jitterBufferTarget = 80; } catch (x) {}     // keep the delay low (ms)
+      if (me.srcObject !== e.streams[0]) { me.srcObject = e.streams[0]; me.play().catch(() => {}); }
+    };
+    pc.onconnectionstatechange = () => {
+      if (mine !== pc) return;
+      const st = pc.connectionState;
+      if (st === 'connected') lastEvent = 'connected';
+      if (st === 'failed' || st === 'disconnected') { lastEvent = 'reconnecting'; localAgain(1000); }
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitIce(pc);
+    const r = await fetch(`/obs/cam/${cid}/whep${q}`, {method: 'POST', headers: {'Content-Type': 'application/sdp'}, body: pc.localDescription.sdp});
+    if (mine !== pc) return;
+    if (r.status !== 201) { lastEvent = r.status === 404 ? 'waiting for phone' : 'whep ' + r.status; return localAgain(1500); }
+    session = r.headers.get('X-Session');
+    await pc.setRemoteDescription({type: 'answer', sdp: await r.text()});
+  } catch (e) { lastEvent = 'error'; localAgain(2000); }
+}
+async function localStats() {
+  if (!pc) { parsed = null; return; }
+  try {
+    const rep = await pc.getStats(); let vid = null, aud = null, pair = null; const codecs = {};
+    rep.forEach(s => { if (s.type === 'inbound-rtp' && s.kind === 'video') vid = s; if (s.type === 'inbound-rtp' && s.kind === 'audio') aud = s;
+      if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s; if (s.type === 'codec') codecs[s.id] = s.mimeType; });
+    if (!vid) { parsed = null; return; }
+    const now = performance.now();
+    const kbps = lastIn && vid.bytesReceived >= lastIn.b ? (vid.bytesReceived - lastIn.b) * 8 / (now - lastIn.t) : null;
+    const akbps = lastIn && aud && lastIn.ab != null ? (aud.bytesReceived - lastIn.ab) * 8 / (now - lastIn.t) : null;
+    const moving = !!(lastIn && vid.framesDecoded > lastIn.f);
+    const lost = vid.packetsLost || 0, got = vid.packetsReceived || 0;
+    const sent = lastIn ? (got - lastIn.r) + (lost - lastIn.l) : 0;
+    const loss = sent > 0 ? 100 * (lost - lastIn.l) / sent : null;
+    lastIn = {b: vid.bytesReceived, ab: aud ? aud.bytesReceived : null, t: now, f: vid.framesDecoded, r: got, l: lost};
+    if (moving) lastVideoAt = Date.now();
+    parsed = moving ? {width: vid.frameWidth, height: vid.frameHeight, fps: vid.framesPerSecond,
+      bitrate_kbps: kbps != null ? Math.round(kbps) : null, jitter_ms: vid.jitter != null ? Math.round(vid.jitter * 1000) : null,
+      packet_loss_pct: loss != null ? Math.max(0, Math.round(loss * 10) / 10) : null,
+      rtt_ms: pair && pair.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) : null,
+      audio_kbps: akbps != null ? Math.round(akbps) : null, codec: (codecs[vid.codecId] || '').replace('video/', '') || null} : null;
+    if (moving && vid.frameWidth && vid.frameHeight && (vid.frameWidth / vid.frameHeight).toFixed(3) !== (vw / vh).toFixed(3)) {
+      vw = vid.frameWidth; vh = vid.frameHeight; layout();
+    }
+  } catch (e) {}
+}
 function mount() {
+  closeLocal();
   if (frame) frame.remove();
   frame = null; stats = null;
+  if (enabled && transport === 'local') {
+    frame = document.createElement('video');
+    frame.autoplay = true; frame.playsInline = true; frame.muted = false;
+    mountedAt = Date.now();
+    document.body.appendChild(frame);
+    layout();
+    localConnect();
+    return;
+  }
   if (!enabled || !viewUrl) return;
   frame = document.createElement('iframe');
   frame.allow = 'autoplay;fullscreen';
@@ -50,8 +126,11 @@ async function config() {
     const r = await fetch(`/obs/cam/${cid}/config${q}`, {cache: 'no-store'});
     if (!r.ok) return;
     const j = await r.json();
-    if (j.view_url !== viewUrl || j.reload !== reload || j.enabled !== enabled) {
-      viewUrl = j.view_url; reload = j.reload; enabled = j.enabled; mount();
+    // FestCast was updated while OBS kept this page open: load the new page (only while there is no picture)
+    if (pageVersion === null) pageVersion = j.page;
+    else if (j.page !== pageVersion && Date.now() - lastVideoAt > 10000) { location.reload(); return; }
+    if (j.view_url !== viewUrl || j.reload !== reload || j.enabled !== enabled || j.transport !== transport) {
+      viewUrl = j.view_url; reload = j.reload; enabled = j.enabled; transport = j.transport; mount();
     }
     setPicture(j.rotation, j.frame);
   } catch (e) {}
@@ -74,11 +153,14 @@ window.addEventListener('message', (e) => {
   }
   if (e.data.action) lastEvent = e.data.action;
 });
-setInterval(() => { try { frame && frame.contentWindow.postMessage({getStats: true}, '*'); } catch (e) {} }, 2000);
+setInterval(() => { try { frame && transport !== 'local' && frame.contentWindow.postMessage({getStats: true}, '*'); } catch (e) {} }, 2000);
 setInterval(async () => {
   try {
+    if (transport === 'local') await localStats();
+    const body = transport === 'local' ? {parsed, event: lastEvent}
+      : {stats: (Date.now() - statsAt < 5000) ? stats : null, event: lastEvent};
     const r = await fetch(`/obs/cam/${cid}/stats${q}`, {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({stats: (Date.now() - statsAt < 5000) ? stats : null, event: lastEvent})});
+      body: JSON.stringify(body)});
     const j = await r.json();
     if (j.reload !== undefined && reload !== null && j.reload !== reload) config();
     if (j.rotation !== undefined) setPicture(j.rotation, j.frame);

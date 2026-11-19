@@ -37,7 +37,7 @@ async def state(request: Request):
             "layouts": c.layouts.snapshot(), "recording": c.recording.view(), "outputs": c.outputs.view(),
             "presentations": c.presentations.snapshot(), "metrics": c.metrics.latest,
             "notifications": list(c.bus.notifications)[:50], "previews": c.previews,
-            "server": {"lan_ip": c.lan_ip, "port": c.settings.port, "public_base": c.public_base,
+            "server": {"lan_ip": c.lan_ip, "port": c.settings.port, "public_base": c.public_base, "ip_base": c.ip_base,
                        "simulation": c.settings.simulation, "remote_access": bool(c.settings.admin_password),
                        "local": request.app.state.auth.is_local(request)}}
 
@@ -109,6 +109,7 @@ class CamPatch(BaseModel):
     bitrate_kbps: int | None = None
     rotation: int | None = None
     frame: str | None = None
+    transport: str | None = None
 
 
 @router.patch("/cameras/{cid}")
@@ -145,8 +146,9 @@ async def camera_qr(request: Request, cid: str):
     inv = c.cameras.invitation(cid)
     if not inv:
         raise HTTPException(404, "no active invitation")
-    link = c.cameras.invite_link(inv.token)
-    return {"link": link, "qr": qr_data_uri(link)}
+    link, ip_link = c.cameras.invite_link(inv.token), c.cameras.invite_link(inv.token, ip=True)
+    direct = c.cameras.direct_link(cid)
+    return {"link": link, "qr": qr_data_uri(link), "ip_link": ip_link, "direct": direct, "direct_qr": qr_data_uri(direct) if direct else None}
 
 
 @router.post("/cameras/{cid}/reconnect")
@@ -415,7 +417,41 @@ async def recording(request: Request):
 
 @router.put("/recording/config")
 async def recording_config(request: Request, body: dict):
-    return ctx(request).recording.set_config(body)
+    """Save and, when OBS is connected and idle, apply straight away (one step for the operator)."""
+    c = ctx(request)
+    cfg = c.recording.set_config(body)
+    out: dict = {"config": cfg, "applied": None, "apply_error": None}
+    if c.obs.connected and not c.obs.state.get("recording"):
+        try:
+            out["applied"] = await c.recording.apply_to_obs()
+        except Exception as e:  # noqa: BLE001
+            out["apply_error"] = str(e)
+    elif c.obs.state.get("recording"):
+        out["apply_error"] = "Saved. OBS is recording, so the new settings apply to the next recording."
+    return out
+
+
+@router.post("/recording/browse")
+async def recording_browse(request: Request):
+    """Open a Windows folder picker on the FestCast PC; returns the chosen folder (or null if cancelled)."""
+    import asyncio
+
+    def pick() -> str | None:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        try:
+            return filedialog.askdirectory(title="Choose the FestCast recording folder",
+                                           initialdir=ctx(request).recording.config["root"], mustexist=False) or None
+        finally:
+            root.destroy()
+    try:
+        path = await asyncio.to_thread(pick)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Folder picker not available here ({e}); type the path instead") from e
+    return {"path": path.replace("/", "\\") if path else None}
 
 
 @router.get("/recording/destination")
@@ -512,7 +548,7 @@ async def receiver_qr(request: Request, rid: str):
     if not r:
         raise HTTPException(404)
     link = c.outputs.link(r)
-    return {"link": link, "qr": qr_data_uri(link)}
+    return {"link": link, "qr": qr_data_uri(link), "ip_link": c.outputs.link(r, ip=True)}
 
 
 @router.post("/outputs/programme/start")

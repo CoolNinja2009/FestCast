@@ -90,17 +90,29 @@ class ProductionService:
             with self.ctx.db.session() as s:
                 s.get(Production, p.id).started_at = None
         log.info("production ended")
+        # Recording follows the production when "record with the production" is on: it started with it, it stops with it.
+        if self.ctx.recording.config.get("auto_start") and self.ctx.obs.connected \
+                and self.ctx.obs.state.get("recording"):
+            try:
+                await self.ctx.recording.stop()
+                self.ctx.bus.notify("info", "Production ended: recording stopped", "recording")
+            except Exception as e:  # noqa: BLE001
+                self.ctx.bus.notify("error", f"Could not stop the recording: {e}", "recording")
         self.ctx.cameras.publish()
         self.publish()
         return self.view()
 
     # -- switching ------------------------------------------------------------------------------------
     async def set_transition(self, name: str | None, duration_ms: int | None) -> None:
-        if name:
+        # Only talk to OBS when something changes: every extra round trip delays the switch.
+        if name and name != self.ctx.obs.state.get("transition"):
             await self.ctx.obs.call("SetCurrentSceneTransition", {"transitionName": name})
+            self.ctx.obs.state["transition"] = name
         if duration_ms is not None:
-            await self.ctx.obs.call("SetCurrentSceneTransitionDuration",
-                                    {"transitionDuration": max(50, min(int(duration_ms), 20000))})
+            d = max(50, min(int(duration_ms), 20000))
+            if d != getattr(self, "_duration_ms", None):
+                await self.ctx.obs.call("SetCurrentSceneTransitionDuration", {"transitionDuration": d})
+                self._duration_ms = d
 
     async def preview(self, scene: str) -> None:
         obs = self.ctx.obs

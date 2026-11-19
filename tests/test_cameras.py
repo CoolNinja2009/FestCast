@@ -126,6 +126,18 @@ def test_revoke_rotates_stream_and_kills_old_link(env):
     assert f"push={env.ctx.cameras.camera(cid).stream_id}" in new["publish_url"]
 
 
+def test_qr_has_join_and_direct_links(env):
+    env.create_production(1)
+    cid = env.cam_ids()[0]
+    q = env.client.get(f"/api/cameras/{cid}/qr").json()
+    assert q["link"].endswith(f"/join/{_token(env, cid)}") and q["qr"].startswith("data:image/png")
+    join = env.client.get(f"/api/public/join/{_token(env, cid)}").json()
+    assert q["direct"] == join["publish_url"] and q["direct"].startswith("https://")
+    assert q["direct_qr"].startswith("data:image/png")
+    assert env.client.post(f"/api/cameras/{cid}/revoke").status_code == 200   # revoke kills the direct link too
+    assert q["direct"] != env.client.get(f"/api/cameras/{cid}/qr").json()["direct"]
+
+
 def test_expired_invitation_404(env):
     env.create_production(1)
     cid = env.cam_ids()[0]

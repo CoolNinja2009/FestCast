@@ -32,6 +32,10 @@ Not yet verified: real phone feed (see docs/SETUP.md checklist).
 Ports are automatic (`backend/core/ports.py`, remembered in `data/ports.json`); a port someone owns on 127.0.0.1 counts as
 busy (this PC has a service on 127.0.0.1:8000). OBS canvas here is 2560x1440@60 -> 1080p output.
 Cameras: unlimited slots (+ Add camera); templates up to 6 plus an auto-grid for any count.
+Local camera transport (default, `FESTCAST_CAMERA_TRANSPORT`): phone https page `/cam/<token>` (second uvicorn
+listener, self-signed cert in data/tls, port 8443+) -> WHIP via FestCast -> MediaMTX `cam_<stream_id>` -> WHEP in the
+OBS page. Verified in simulation with real MediaMTX: 1920x1080 30 fps H.264 ~6-7 Mbps; revoke kicks the publisher.
+Not yet verified on real phones (self-signed cert prompt on Android/iOS).
 
 Long-run (2026-11-19, real OBS): `scripts/soak_test.py` 30 min with MediaMTX killed at 8 min and FestCast hard-killed
 at 16 min -> 0 OBS recording gaps; 8 min run with FestCast killed -> TV outage 0 s (restarted FestCast re-attaches to

@@ -80,6 +80,12 @@ test layout. It never changes your programme scene.
   dashboard. If it picks the wrong adapter (VPN/VirtualBox), set `FESTCAST_PUBLIC_HOST=192.168.x.x` in `.env`.
 * Windows Firewall: allow Python (dashboard/links) and MediaMTX (TV output) when Windows asks
   (TV output). Windows asks the first time; choose *Private networks*.
+* **Local cameras** (the default) never touch the internet: the phone sends straight to MediaMTX on this PC
+  (UDP 8189), so picture quality is only limited by the Wi-Fi. The camera page is
+  `https://<PC IP>:8443/cam/...` with FestCast's own certificate (`data/tls/`): the first time, each phone shows a
+  security warning; tap **Advanced → Proceed** (Chrome) or **Show Details → visit this website** (Safari).
+  Per camera you can switch back to VDO.Ninja with the **Local / VDO.Ninja** selector on the camera card.
+* For a 9-hour show use a dedicated 5 GHz router (client isolation off), the PC on a cable, phones near the router.
 * School Wi-Fi often isolates clients ("AP/client isolation"). If phones can't open the link, ask IT or use a
   dedicated router for the production.
 
@@ -113,13 +119,15 @@ These steps need hardware or a network that the automated tests can't provide:
 | `OBS not reachable` | OBS isn't running, or its WebSocket server is off. |
 | Camera stays **Waiting for phone** | Phone didn't press Start, or is on another network. Re-open the link. |
 | Camera **Not monitored** | OBS hasn't loaded its browser source; check the source exists in OBS. |
-| Picture sideways / portrait with black bars | iPhone Portrait Orientation Lock is on. Press **⟳ Rotate** on the camera card (no OBS changes needed), or have the operator unlock rotation and re-open the link. For a deliberately upright shot use **Fill** to crop to 16:9. |
-| Live but below target | The phone picked the front camera or is in portrait. On the phone use VDO.Ninja's settings to pick the rear camera. |
+| Picture sideways / portrait with black bars | iPhone Portrait Orientation Lock is on. In the layout editor (Production page), click the camera tile: **⟳ Landscape/Portrait** turns the tile portrait so an upright picture fills it; **Turn picture** fixes a picture lying on its side, or have the operator unlock rotation and re-open the link. For a deliberately upright shot use **Fill** to crop to 16:9. |
+| Live but below target | The phone picked the front camera or is in portrait. Local camera page: **Switch camera**. VDO.Ninja: use its settings to pick the rear camera. |
 | Phone link says invalid | It was revoked/expired (48 h). Copy a fresh link from the camera card. |
 | TV: "Waiting for the programme" | Press **Start TV output**; check the MediaMTX log on Outputs. |
 | Echo / hum / strange sound from the PC speakers | Don't play the TV page (or OBS monitoring) on the production PC's own speakers while OBS captures **Desktop Audio**: the sound loops back into the programme. Test TV pages on the TV, or mute Desktop Audio in FestCast's Audio panel. |
 | TV: picture but no sound | Tap the screen once (browsers block autoplay audio). |
 | TV never connects | Firewall UDP 8189 / TCP 8889; check OBS stream encoder is H.264. |
+| Local camera: phone page says "Waiting for FestCast" or never goes LIVE | MediaMTX must be running (Outputs page); firewall must allow MediaMTX (UDP 8189) and Python (TCP 8443); phone and PC on the same network. |
+| Local camera: low resolution / frame rate | The phone page shows what it sends and why it is limited ("limited by bandwidth" = Wi-Fi, "cpu" = phone too hot/slow: lower to 720p). |
 | PPTX import fails | Install LibreOffice, or save the deck as PDF and import that. |
 
 Logs: `data\logs\festcast.jsonl`. Settings → **Download support bundle** creates a redacted zip.

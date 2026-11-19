@@ -108,9 +108,11 @@ def test_receiver_lifecycle(env):
     rv = r.json()["receivers"][0]
     tok = env.ctx.outputs.receivers()[0].token
     assert rv["link"] == f"http://192.168.1.10:8000/tv/{tok}" and rv["state"] == "never_connected"
+    assert len(tok) == 6 and not set(tok) & set("0o1liI")
     rem = env.remote()
     assert rem.get(f"/api/public/tv/{tok}").json() == {"name": "Hall TV"}
     assert rem.post(f"/api/public/tv/{tok}/stats", json={"state": "playing", "width": 1920}).status_code == 200
+    assert rem.get(f"/api/public/tv/{tok.upper()}").json() == {"name": "Hall TV"}  # typed in capitals still works
     v = env.client.get("/api/outputs").json()["receivers"][0]
     assert v["online"] and v["state"] == "playing" and v["width"] == 1920 and v["rtt_ms"] is None
     # MediaMTX not running -> WHEP proxy says 503
@@ -190,3 +192,16 @@ def test_tv_output_stop_restores_default_stream_service(env):
 def test_manual_is_served(env):
     r = env.client.get("/manual")
     assert r.status_code == 200 and "FestCast manual" in r.text and "Camera operator sheet" in r.text
+
+
+def test_links_use_mdns_name_with_ip_fallback(env):
+    env.client.post("/api/outputs/receivers", json={"name": "Hall TV"})
+    env.ctx.mdns.host = "festcast.local"          # as if mDNS announced the name
+    try:
+        rv = env.client.get("/api/outputs").json()["receivers"][0]
+        tok = env.ctx.outputs.receivers()[0].token
+        assert rv["link"] == f"http://festcast.local:8000/tv/{tok}"
+        assert rv["ip_link"] == f"http://192.168.1.10:8000/tv/{tok}"
+    finally:
+        env.ctx.mdns.host = None
+    assert env.client.get("/api/outputs").json()["receivers"][0]["link"].startswith("http://192.168.1.10:8000/")

@@ -4,8 +4,9 @@ async function qr(r: any) {
   const q = await act(() => api('GET', `/api/outputs/receivers/${r.id}/qr`));
   if (!q) return;
   modal(`TV link · ${r.name}`, h('div.col', { style: { alignItems: 'center' } }, h('img.qr', { src: q.qr, alt: 'QR code' }),
-    h('p.small.dim', null, 'Open on the TV\'s browser (or a stick/box on the TV). It connects, reconnects and goes fullscreen on double-click. Tap once to enable sound.'),
-    h('div.link', null, q.link)), [{ label: 'Copy link', run: () => { copy(q.link); return false; } }, { label: 'Done', cls: 'primary' }]);
+    h('div.link', null, q.link),
+    q.ip_link && q.ip_link !== q.link ? h('p.dim.small', { style: { textAlign: 'center' } }, "If the TV can't open the name, type the IP link: ", h('b.mono', null, q.ip_link)) : null),
+    [{ label: 'Copy link', run: () => { copy(q.link); return false; } }, { label: 'Done', cls: 'primary' }]);
 }
 
 async function addHdmi() {
@@ -13,15 +14,14 @@ async function addHdmi() {
   if (!mons) return;
   const sel = h('select', { style: { width: '100%' } }, mons.map((m: any) => h('option', { value: m.monitorIndex }, `${m.monitorIndex}: ${m.monitorName} (${m.monitorWidth}×${m.monitorHeight})`)));
   const nm = h('input', { type: 'text', value: 'HDMI projector', style: { width: '100%' } });
-  modal('Add HDMI output', h('div.col', null, h('label.f', null, 'Name', nm), h('label.f', null, 'Monitor', sel),
-    h('p.small.dim', null, 'Opens an OBS fullscreen programme projector on that screen. It is independent of the wireless output. An HDMI splitter on the PC output is a simple alternative.')), [
+  modal('Add HDMI output', h('div.col', null, h('label.f', null, 'Name', nm), h('label.f', null, 'Monitor', sel)), [
     { label: 'Cancel' },
     { label: 'Add', cls: 'primary', run: async () => !!(await act(() => api('POST', '/api/outputs/receivers', { name: nm.value, kind: 'hdmi', monitor_index: Number(sel.value) }))) }]);
 }
 
 export function outputsPage(el: HTMLElement) {
   el.append(
-    h('div.page-h', null, h('h1', null, 'Outputs'), h('span.sub', null, 'OBS → WHIP → MediaMTX → WebRTC (WHEP) → TV browsers · plus HDMI projectors')),
+    h('div.page-h', null, h('h1', null, 'Outputs')),
     live(h('div.grid.g2'), ['outputs', 'obs'], () => {
       const o = store.get('outputs') || {};
       const m = o.mediamtx || {};
@@ -37,7 +37,7 @@ export function outputsPage(el: HTMLElement) {
               o.programme_streaming ? h('button.btn.red', { onclick: async () => { if (await confirmBox('Stop TV output', 'TVs will lose the programme. Recording is not affected.', 'Stop')) act(() => api('POST', '/api/outputs/programme/stop'), 'Programme output stopped'); } }, 'Stop TV output')
                 : h('button.btn.green', { disabled: !obs.connected || !m.found, onclick: () => act(() => api('POST', '/api/outputs/programme/start'), 'Programme output started') }, 'Start TV output'),
               h('button.btn.sm', { onclick: () => act(() => api('POST', `/api/outputs/mediamtx/${m.state === 'running' ? 'restart' : 'start'}`)) }, m.state === 'running' ? 'Restart MediaMTX' : 'Start MediaMTX')),
-            h('p.small.dim', { style: { margin: 0 } }, 'Uses OBS\'s streaming output (WHIP, H.264 + Opus). OBS can only stream to one place, so external streaming (e.g. YouTube) cannot run at the same time from OBS. For browser playback set OBS\'s stream encoder to H.264 (NVENC), not HEVC/AV1.'))),
+            )),
         h('div.panel', null, h('div.ph', null, h('h2', null, 'MediaMTX log')),
           h('pre.link', { style: { margin: '10px', maxHeight: '210px', overflow: 'auto', whiteSpace: 'pre-wrap' } }, (m.log || []).slice(-25).join('\n') || 'No output yet.')),
       ];
@@ -49,7 +49,7 @@ export function outputsPage(el: HTMLElement) {
           h('button.btn.sm', { onclick: addHdmi }, '+ HDMI projector'))),
       live(h('div'), ['outputs'], () => {
         const rs = (store.get('outputs') || {}).receivers || [];
-        if (!rs.length) return h('div.pb.dim', null, 'No receivers. Add one wireless TV to get its link.');
+        if (!rs.length) return h('div.pb.dim', null, 'No receivers');
         return h('table.t', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Type'), h('th', null, 'State'), h('th', null, 'Picture'), h('th', null, 'Bitrate'),
           h('th', null, 'Jitter / RTT'), h('th', null, 'Lost'), h('th', null, 'Last seen'), h('th', null, '')),
           rs.map((r: any) => h('tr', null, h('td', null, h('b', null, r.name)), h('td', null, r.kind === 'hdmi' ? `HDMI · monitor ${r.monitor_index}` : 'Wireless (WebRTC)'),

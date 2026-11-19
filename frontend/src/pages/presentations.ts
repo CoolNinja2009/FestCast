@@ -66,19 +66,18 @@ function editor(p: any) {
         h('label.f', null, 'Transition', h('select', { onchange: (e: any) => save({ transition: e.target.value }) }, ['fade', 'slide', 'cut'].map(t => h('option', { selected: t === p.transition }, t)))),
         h('label.f', null, 'Background', h('input', { type: 'color', value: p.background, onchange: (e: any) => save({ background: e.target.value }) })),
         h('label.f', null, 'Branding text (bottom left)', h('input', { type: 'text', value: p.branding, placeholder: 'e.g. #SchoolFest2026', onchange: (e: any) => save({ branding: e.target.value }) }))),
-      h('p.small.faint', null, 'Drag slides to reorder. PDF and PPTX are rendered to still images: PowerPoint animations and builds are not preserved.'),
       grid));
 }
 
 export function presentationsPage(el: HTMLElement) {
   const drop = h('div.drop', { onclick: () => { const i = h('input', { type: 'file', multiple: true, accept: '.pdf,.pptx,.ppt,.odp,.png,.jpg,.jpeg,.webp' }); i.onchange = () => upload(Array.from(i.files || [])); i.click(); } },
-    h('b', null, 'Drop a PDF, PPTX or images here'), h('div.small', null, 'or click to choose · several images at once become one slideshow'));
+    h('b', null, 'Drop a PDF, PPTX or images here'), h('div.small', null, 'or click to choose'));
   drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); upload(Array.from(e.dataTransfer?.files || [])); });
 
   el.append(
-    h('div.page-h', null, h('h1', null, 'Presentations'), h('span.sub', null, 'Standby content: shown in the OBS "FC Standby" scene')),
+    h('div.page-h', null, h('h1', null, 'Presentations')),
     h('div.grid.g2', null,
       h('div.panel', null, h('div.ph', null, h('h2', null, 'Import')), h('div.pb.col', null, drop,
         live(h('div.small.dim'), ['presentations'], () => (store.get('presentations') || {}).pptx_supported ? 'PPTX import: LibreOffice found.' :

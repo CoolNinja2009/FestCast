@@ -20,7 +20,7 @@ export function networkPage(el: HTMLElement) {
   disposers.push(store.on('metrics', m => { if (m) { hist.push({ cam_in: m.cameras.in_kbps, out: m.outputs.out_kbps, rx: m.system.net_rx_kbps, tx: m.system.net_tx_kbps }); hist = hist.slice(-300); } }));
 
   el.append(
-    h('div.page-h', null, h('h1', null, 'Network'), h('span.sub', null, 'Local network health for cameras and receivers')),
+    h('div.page-h', null, h('h1', null, 'Network')),
     live(h('div.grid.g4'), ['metrics', '_nh'], () => {
       const m = store.get('metrics') || {};
       const s = m.system || {};
@@ -45,8 +45,7 @@ export function networkPage(el: HTMLElement) {
         }))),
     h('div.grid.g2', { style: { marginTop: '14px' } },
       h('div.panel', null, h('div.ph', null, h('h2', null, 'Interfaces')), h('div.pb', null, ifBox,
-        live(h('p.small.dim'), ['server'], () => `Phones and TVs use ${(store.get('server') || {}).public_base || ''}. If that is the wrong adapter (e.g. a VirtualBox/VPN address), set FESTCAST_PUBLIC_HOST in .env.`),
-        h('p.small.dim', null, 'Camera transport: VDO.Ninja signalling needs internet access; media flows peer-to-peer on the LAN when possible. The TV output (MediaMTX) is fully local.'))),
+        live(h('p.small.dim'), ['server'], () => `Phones and TVs use ${(store.get('server') || {}).public_base || ''}. If that is the wrong adapter (e.g. a VirtualBox/VPN address), set FESTCAST_PUBLIC_HOST in .env.`))),
       h('div.panel', null, h('div.ph', null, h('h2', null, 'Connection history')), histBox)),
   );
 }

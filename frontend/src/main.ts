@@ -20,21 +20,36 @@ const PAGES: [string, string, (el: HTMLElement) => void][] = [
   ['settings', 'Settings', settingsPage],
 ];
 
+// Line icons (Lucide-style, 24px grid, stroke = currentColor). Static strings only.
+const I = (d: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON: Record<string, string> = {
+  overview: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
+  cameras: I('<path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/>'),
+  production: I('<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'),
+  presentations: I('<path d="M2 3h20M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3M7 21l5-5 5 5"/>'),
+  outputs: I('<rect x="2" y="7" width="20" height="15" rx="2"/><path d="m17 2-5 5-5-5"/>'),
+  recordings: I('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/>'),
+  network: I('<path d="M12 20h.01M2 8.8a15 15 0 0 1 20 0M5 12.9a10 10 0 0 1 14 0M8.5 16.4a5 5 0 0 1 7 0"/>'),
+  settings: I('<path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
+  manual: I('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'),
+};
+const icon = (id: string) => h('span', { html: ICON[id] || '', style: { display: 'contents' } });
+
 const app = document.getElementById('app')!;
 let main: HTMLElement;
 
 function shell() {
   const nav = h('nav.side', null,
-    PAGES.map(([id, label], i) => h('a', { href: `#/${id}`, 'data-id': id }, label, h('span.k', null, `${i + 1}`))),
+    PAGES.map(([id, label], i) => h('a', { href: `#/${id}`, 'data-id': id }, icon(id), label, h('span.k', null, `${i + 1}`))),
     h('div.sep'),
-    h('a', { href: '/manual', target: '_blank', rel: 'noopener' }, 'Manual', h('span.k', null, '↗')),
+    h('a', { href: '/manual', target: '_blank', rel: 'noopener' }, icon('manual'), 'Manual', h('span.k', null, '↗')),
     h('div.foot', null, live(h('div'), ['server', 'link'], () => {
       const s = store.get('server') || {};
-      return [h('div', null, store.get('link') === 'up' ? 'Dashboard connected' : 'Dashboard reconnecting…'),
+      return [h('div', { class: store.get('link') === 'up' ? 'ok' : 'bad' }, store.get('link') === 'up' ? 'Connected' : 'Reconnecting…'),
               h('div.mono', null, s.public_base || '')];
     })));
   const top = h('header.top', null,
-    h('div.brand', null, h('i'), 'FESTCAST'),
+    h('div.brand', null, h('i'), 'FestCast'),
     live(h('div.row.grow'), ['cameras', 'obs', 'recording', 'production', 'server', 'link'], topBar));
   main = h('main', { id: 'main' });
   clear(app, top, nav, main);
@@ -80,12 +95,13 @@ function loginView(remoteEnabled: boolean) {
     if (r) location.reload();
   };
   pw.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
-  clear(app, h('div.login.panel', { style: { gridColumn: '1/-1' } },
-    h('div.ph', null, h('h2', null, 'FestCast operator login')),
-    h('div.pb.col', null,
+  clear(app, h('div.login-wrap', { style: { gridColumn: '1/-1' } },
+    h('div.brand', null, h('i'), 'FestCast'),
+    h('div.panel', null, h('div.pb.col', { style: { gap: '12px', padding: '20px' } },
       remoteEnabled ? [pw, h('button.btn.primary', { onclick: go }, 'Sign in')]
-        : h('p.dim', null, 'Remote control is disabled. Open FestCast on the production PC (the address start.bat prints), or set FESTCAST_ADMIN_PASSWORD there to allow control from this device.'))));
+        : h('p.dim', null, 'Remote control is off.')))));
   app.style.display = 'block';
+  if (remoteEnabled) pw.focus();
 }
 
 async function boot() {
@@ -94,8 +110,8 @@ async function boot() {
     if (!me.admin) return loginView(me.remote_enabled);
     await loadState();
   } catch (e: any) {
-    clear(app, h('div.empty', { style: { gridColumn: '1/-1' } }, h('h2', null, 'Cannot reach the FestCast backend'), h('p', null, String(e.message || e)),
-      h('button.btn', { onclick: () => location.reload() }, 'Retry')));
+    clear(app, h('div.empty', { style: { gridColumn: '1/-1' } }, h('h2', null, 'Can’t reach FestCast'), h('p', null, String(e.message || e)),
+      h('button.btn.primary', { onclick: () => location.reload() }, 'Try again')));
     return;
   }
   shell();

@@ -22,6 +22,7 @@ from ..services.audio import AudioService
 from ..services.cameras import CameraService, cam_input_name
 from ..services.layouts import LayoutService
 from ..services.metrics import MetricsService, lan_ip
+from .mdns import Mdns
 from ..services.outputs import OutputService
 from ..services.presentations import PresentationService
 from ..services.production import ProductionService
@@ -58,6 +59,7 @@ class Ctx:
         self.local_key = self.db.get("local_key") or secrets.token_urlsafe(16)
         self.db.set("local_key", self.local_key)
         self.lan_ip = settings.public_host or lan_ip()
+        self.mdns = Mdns(settings.mdns_name, self.lan_ip, settings.port)
         if transport_factory is None:
             if settings.simulation:
                 transport_factory = MockObsTransport
@@ -86,7 +88,26 @@ class Ctx:
 
     @property
     def public_base(self) -> str:
+        """Base of phone/TV links: festcast.local when mDNS is announced, else the IP."""
+        return f"http://{self.mdns.host or self.lan_ip}:{self.settings.port}"
+
+    @property
+    def ip_base(self) -> str:
+        """The same links by IP, for devices that don't resolve .local names."""
         return f"http://{self.lan_ip}:{self.settings.port}"
+
+    @property
+    def https_port(self) -> int:
+        return self.settings.https_port
+
+    def https_base(self, ip: bool = False) -> str:
+        """Base of the local phone camera page (self-signed HTTPS: phones confirm it once)."""
+        return f"https://{self.lan_ip if ip else (self.mdns.host or self.lan_ip)}:{self.settings.https_port}"
+
+    async def _start_mdns(self) -> None:
+        if await self.mdns.start():
+            self.cameras.publish()
+            self.outputs.publish()
 
     def _scene_changed(self) -> None:
         self.production.publish()
@@ -117,7 +138,7 @@ class Ctx:
                     for key in ("program_scene", "preview_scene"):
                         sc = self.obs.state.get(key)
                         if sc:
-                            img = await self.obs.screenshot(sc, 640, 60)
+                            img = await self.obs.screenshot(sc, 1280, 80)   # sharp enough to read slide text
                             if img:
                                 shots[key] = img
                     self.previews = shots
@@ -137,8 +158,10 @@ class Ctx:
         self._loop_tasks = {name: asyncio.create_task(f(), name=name) for name, f in self._loops.items()}
         self.restarts: dict[str, int] = {}
         self._tasks.append(asyncio.create_task(self._supervise(), name="supervisor"))
+        self._tasks.append(asyncio.create_task(self._start_mdns(), name="mdns"))
         if self.outputs.want_programme:
             self.outputs.ensure_watchdog()
+        self._tasks.append(asyncio.create_task(self.cameras.ensure_mtx(), name="camera-mediamtx"))
 
     async def _supervise(self) -> None:
         """A long show must never lose a background loop to an unexpected bug: restart any that ends."""
@@ -163,6 +186,7 @@ class Ctx:
         await asyncio.gather(*self._tasks, *getattr(self, "_loop_tasks", {}).values(), return_exceptions=True)
         await self.outputs.shutdown()
         await self.obs.stop()
+        await self.mdns.stop()
         keep_awake(False)
 
     # -- diagnostics & backup ------------------------------------------------------------------------------
@@ -176,7 +200,7 @@ class Ctx:
                 "simulation": self.settings.simulation, "obs": {k: v for k, v in self.obs.state.items()},
                 "cameras": cams, "recording": {k: v for k, v in self.recording.view().items()},
                 "outputs": {"mediamtx": self.outputs.view()["mediamtx"],
-                            "receivers": [{k: v for k, v in r.items() if k != "link"}
+                            "receivers": [{k: v for k, v in r.items() if k not in ("link", "ip_link")}
                                           for r in self.outputs.view()["receivers"]]},
                 "metrics": self.metrics.latest, "notifications": list(self.bus.notifications)}
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:

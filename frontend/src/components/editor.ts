@@ -124,7 +124,7 @@ export function layoutEditor(): HTMLElement {
       h('div.lay-list', null, ls.length ? ls.map(l => h('div.lay-item', { class: l.id === curId ? 'on' : '', onclick: () => l.id !== curId && load(l.id) },
         h('span.grow', null, l.name), l.live ? h('span.live', null, 'LIVE') : null,
         h('span.pill.plain', { class: l.sync?.state, title: l.sync?.error || '' }, l.sync?.state === 'synced' ? 'OBS' : l.sync?.state || ''))) :
-        h('p.small.dim', null, 'No layouts yet. Create one, then drag cameras in or pick a template.')));
+        h('p.small.dim', null, 'No layouts')));
   }
 
   // ------------------------------------------------------------------ palette
@@ -379,6 +379,27 @@ export function layoutEditor(): HTMLElement {
     const g = on ? uid() : null;
     change(() => s.forEach(e => { e.group = g; }));
   }
+  /** Turn a tile 90° about its centre: landscape <-> portrait. A portrait camera tile crops the source to its middle
+   * 9:16 strip (where FestCast's OBS page puts an upright phone picture), so the picture fills the tile. */
+  function turnTile(e: El) {
+    if (e.locked) return;
+    change(() => {
+      const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
+      let wpx = e.h * H, hpx = e.w * W;                       // swap the pixel size
+      const k = Math.min(1, W / wpx, H / hpx);                // keep it inside the canvas
+      wpx *= k; hpx *= k;
+      e.w = r4(wpx / W); e.h = r4(hpx / H);
+      e.x = r4(clamp(cx - e.w / 2, 0, 1 - e.w)); e.y = r4(clamp(cy - e.h / 2, 0, 1 - e.h));
+      if (e.type === 'camera') {
+        // The 9:16 middle is 34.2% in from each side; cut 35% (and a little top/bottom to stay 9:16) so the
+        // picture's edge never shows as a seam at the tile's edge.
+        const side = 0.35, tb = r4((1 - (1 - 2 * side) * (16 / 9) ** 2) / 2);   // 576x1024 of 1920x1080 = 9:16
+        e.crop = hpx > wpx ? { l: side, t: tb, r: side, b: tb } : { l: 0, t: 0, r: 0, b: 0 };
+        e.fit = 'fit';
+      }
+    });
+  }
+
   function setAspect(ar: number) {
     const s = selected().filter(e => !e.locked);
     change(() => s.forEach(e => { e.h = r4(clamp(e.w * (W / H) / ar, .01, 2)); }));
@@ -422,8 +443,7 @@ export function layoutEditor(): HTMLElement {
       h('label.c.small', null, h('input', { type: 'checkbox', checked: holdLive, onchange: (e: any) => { holdLive = e.target.checked; } }), 'When this layout is live, hold edits until "Push to air"'));
     const tplSec = h('div.sec', null, h('b', null, 'Templates'), h('div.tpl', null, TEMPLATES.map(t => h('button', { title: t.id === 'auto' ? `${t.label}: ${cams().length} camera(s)` : t.label,
       class: t.n === tplSuggest || (t.id === 'auto' && tplSuggest > 6) ? 'sug' : '', onclick: () => applyTemplate(t) },
-      (t.id === 'auto' ? autoBoxes : t.boxes).map(b => h('i', { style: { left: b[0] * 100 + '%', top: b[1] * 100 + '%', width: b[2] * 100 + '%', height: b[3] * 100 + '%' } }))))),
-      h('span.tiny.faint', null, 'Green = suggested for your camera count. Templates replace camera tiles and keep graphics.'));
+      (t.id === 'auto' ? autoBoxes : t.boxes).map(b => h('i', { style: { left: b[0] * 100 + '%', top: b[1] * 100 + '%', width: b[2] * 100 + '%', height: b[3] * 100 + '%' } }))))));
     if (!s.length) return clear(insp, layoutSec, tplSec, h('div.sec', null, h('b', null, 'Shortcuts'), h('div.tiny.dim', null,
       'Drag to move · handles resize (Shift keeps ratio) · Shift-click multi-select · Ctrl+Z/Y undo/redo · Ctrl+D duplicate · Del delete · arrows nudge (Shift ×10) · Ctrl+G group · Ctrl+A all · Esc deselect')));
     if (s.length > 1) return clear(insp, layoutSec, h('div.sec', null, h('b', null, `${s.length} selected`),
@@ -439,12 +459,27 @@ export function layoutEditor(): HTMLElement {
         h('button.btn.sm', { onclick: () => order('up') }, 'Forward'), h('button.btn.sm', { onclick: () => order('down') }, 'Backward')),
       h('div.two', null, num('X px', P(e.x, 'x'), v => { e.x = r4(v / W); }), num('Y px', P(e.y, 'y'), v => { e.y = r4(v / H); }),
         num('Width px', P(e.w, 'x'), v => { e.w = r4(clamp(v / W, .005, 3)); }), num('Height px', P(e.h, 'y'), v => { e.h = r4(clamp(v / H, .005, 3)); })),
-      h('div.row.wrap', null, h('span.tiny.faint', null, 'Aspect'), ...[['16:9', 16 / 9], ['4:3', 4 / 3], ['1:1', 1], ['9:16', 9 / 16]].map(([lab, ar]) => h('button.btn.sm', { onclick: () => setAspect(ar as number) }, lab as string))),
+      h('div.row.wrap', null, ...[['16:9', 16 / 9], ['4:3', 4 / 3], ['1:1', 1], ['9:16', 9 / 16]].map(([lab, ar]) => h('button.btn.sm', { onclick: () => setAspect(ar as number) }, lab as string))),
       h('label.f', null, `Opacity ${Math.round(e.opacity * 100)}%`, h('input', { type: 'range', min: '0', max: '1', step: '0.05', value: String(e.opacity), onchange: (ev: any) => change(() => { e.opacity = Number(ev.target.value); }) })))];
     if (e.type === 'camera' || e.type === 'image') {
       sec.push(h('div.sec', null, h('b', null, 'Source'),
         e.type === 'camera' ? h('label.f', null, 'Camera', h('select', { onchange: (ev: any) => change(() => { e.camera_id = ev.target.value; const c = cams().find(x => x.id === ev.target.value); if (c) e.name = c.name; }) },
           h('option', { value: '' }, '— none —'), cams().map(c => h('option', { value: c.id, selected: c.id === e.camera_id }, c.name)))) : null,
+        e.type === 'camera' && e.camera_id ? (() => {
+          const cam = cams().find(c => c.id === e.camera_id);
+          const rot = cam?.rotation || 0;
+          const portrait = e.h * H > e.w * W;
+          return h('div.col', null,
+            h('div.row.wrap', null,
+              h('button.btn.sm', { class: portrait ? 'on' : '', title: 'Turn this tile between landscape and portrait. Portrait shows the middle of the picture, where an upright phone\'s video sits.',
+                onclick: () => turnTile(e) }, portrait ? '⟳ Portrait' : '⟳ Landscape')),
+            h('div.row.wrap', null,
+              h('button.btn.sm', { title: 'Turn the camera\'s picture itself 90° (iPhone Portrait Orientation Lock). Applies wherever this camera is used.',
+                onclick: async () => {
+                  const r = await act(() => api('PATCH', `/api/cameras/${e.camera_id}`, { rotation: (rot + 90) % 360 }));
+                  if (r && cam) { cam.rotation = r.rotation; drawInsp(); }
+                } }, `Turn picture ${rot}°`)));
+        })() : null,
         h('label.f', null, 'Fit', h('select', { onchange: (ev: any) => change(() => { e.fit = ev.target.value; }) },
           h('option', { value: 'fit', selected: e.fit === 'fit' }, 'Fit inside (keep ratio)'), h('option', { value: 'stretch', selected: e.fit === 'stretch' }, 'Stretch to box'))),
         h('b.tiny.faint', null, 'Crop (% of source)'),
