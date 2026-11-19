@@ -23,8 +23,10 @@ Live production system for a school festival. Read `docs/ARCHITECTURE.md` first 
 
 ## Status (2026-11-19)
 
-Verified: 88 backend tests; dashboard click-through in simulation and on real OBS 33.0.1 (WS 5.7.6);
+Verified: 93 backend tests; dashboard click-through in simulation and on real OBS 33.0.1 (WS 5.7.6);
 `scripts/obs_smoke_test.py` all-pass on the real PC (sources, probe pages inside OBS, layout transforms,
 NVENC H.264 1920x1080 MKV verified by ffprobe); probe page against live vdo.ninja; phone page hand-off.
 Not yet verified: real phone feed, MediaMTX TV playback (see docs/SETUP.md checklist).
-This PC: another service owns 127.0.0.1:8000 (hence port 8420); OBS canvas is 2560x1440@60 -> 1080p output.
+Ports are automatic (`backend/core/ports.py`, remembered in `data/ports.json`); a port someone owns on 127.0.0.1 counts as
+busy (this PC has a service on 127.0.0.1:8000). OBS canvas here is 2560x1440@60 -> 1080p output.
+Cameras: unlimited slots (+ Add camera); templates up to 6 plus an auto-grid for any count.

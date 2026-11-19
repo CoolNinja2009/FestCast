@@ -14,6 +14,19 @@ const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
 const W = 1920, H = 1080;
 
+/** Even grid for any number of cameras (16:9 canvas: square-ish grids keep 16:9 tiles). */
+function autoGrid(n: number): number[][] {
+  if (n <= 0) return [];
+  const cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+  const w = 1 / cols, hh = 1 / rows, out: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / cols), inRow = r === rows - 1 ? n - r * cols : cols;
+    const off = (1 - inRow * w) / 2; // centre a short last row
+    out.push([off + (i % cols) * w, r * hh, w, hh]);
+  }
+  return out;
+}
+
 function mk(type: El['type'], extra: Partial<El> = {}): El {
   return { id: uid(), type, name: type === 'camera' ? 'Camera' : type === 'text' ? 'Text' : type === 'image' ? 'Image' : 'Shape',
     x: .3, y: .3, w: .4, h: .4, z: 0, locked: false, hidden: false, fit: 'fit', crop: { l: 0, t: 0, r: 0, b: 0 }, group: null, opacity: 1,
@@ -29,6 +42,9 @@ const TEMPLATES: { id: string; label: string; n: number; boxes: number[][] }[] =
   { id: 'main2', label: 'Main + two side', n: 3, boxes: [[0, .1667, .6667, .6667], [.6667, .1667, .3333, .3333], [.6667, .5, .3333, .3333]] },
   { id: 'grid3', label: 'Three grid', n: 3, boxes: [[0, 0, .5, .5], [.5, 0, .5, .5], [.25, .5, .5, .5]] },
   { id: 'grid4', label: 'Four grid', n: 4, boxes: [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]] },
+  { id: 'main4', label: 'Main + four below', n: 5, boxes: [[.125, 0, .75, .75], [0, .75, .25, .25], [.25, .75, .25, .25], [.5, .75, .25, .25], [.75, .75, .25, .25]] },
+  { id: 'grid6', label: 'Six grid (3×2)', n: 6, boxes: [[0, 0, 1 / 3, .5], [1 / 3, 0, 1 / 3, .5], [2 / 3, 0, 1 / 3, .5], [0, .5, 1 / 3, .5], [1 / 3, .5, 1 / 3, .5], [2 / 3, .5, 1 / 3, .5]] },
+  { id: 'auto', label: 'All cameras (auto grid)', n: -1, boxes: [] },
   { id: 'free', label: 'Empty (freeform)', n: 0, boxes: [] },
 ];
 
@@ -157,9 +173,10 @@ export function layoutEditor(): HTMLElement {
     const t2 = mk('text', { name: 'Lower third subtitle', text: 'Role / performance', size: 34, bold: false, color: '#c9ccd1', x: .068, y: .852, w: .45, h: .04, z: z + 3, group: g });
     change(() => { els.push(bar, accent, t1, t2); sel = new Set([bar.id, accent.id, t1.id, t2.id]); });
   }
-  function applyTemplate(t: typeof TEMPLATES[number]) {
+  function applyTemplate(t: (typeof TEMPLATES)[number]) {
     if (!curId) return toast('Create or select a layout first', 'warning');
     const cs = [...cams()].sort((a, b) => (a.status === 'live' ? 0 : 1) - (b.status === 'live' ? 0 : 1) || a.slot - b.slot);
+    if (t.id === 'auto') t = { ...t, boxes: autoGrid(cs.length) };
     change(() => {
       const keep = els.filter(e => e.type !== 'camera');
       const camEls = t.boxes.map((b, i) => mk('camera', { x: b[0], y: b[1], w: b[2], h: b[3], z: i + 1, camera_id: cs[i]?.id || '', name: cs[i]?.name || `Camera ${i + 1}` }));
@@ -391,6 +408,7 @@ export function layoutEditor(): HTMLElement {
     if (!l) return clear(insp, h('div.sec', null, h('p.dim.small', null, 'No layout selected.')));
     const s = selected();
     const tplSuggest = cams().filter(c => c.status === 'live').length || cams().length;
+    const autoBoxes = autoGrid(cams().length);
     const layoutSec = h('div.sec', null, h('b', null, 'Layout'),
       h('div.row', null, h('span.grow', { style: { fontWeight: '600' } }, l.name), l.live ? h('span.pill.bad.plain', null, 'LIVE') : null),
       h('div.row.wrap', null,
@@ -402,8 +420,9 @@ export function layoutEditor(): HTMLElement {
         h('button.btn.sm', { onclick: checkObs }, 'Check OBS'),
         h('button.btn.sm.ghost.danger', { onclick: async () => { if (await confirmBox('Delete layout', `Delete "${l.name}" and its OBS scene?`, 'Delete')) { const r = await act(() => api('DELETE', `/api/layouts/${l.id}`), 'Layout deleted'); if (r) load(null); } } }, 'Delete')),
       h('label.c.small', null, h('input', { type: 'checkbox', checked: holdLive, onchange: (e: any) => { holdLive = e.target.checked; } }), 'When this layout is live, hold edits until "Push to air"'));
-    const tplSec = h('div.sec', null, h('b', null, 'Templates'), h('div.tpl', null, TEMPLATES.map(t => h('button', { title: t.label, class: t.n === tplSuggest ? 'sug' : '', onclick: () => applyTemplate(t) },
-      t.boxes.map(b => h('i', { style: { left: b[0] * 100 + '%', top: b[1] * 100 + '%', width: b[2] * 100 + '%', height: b[3] * 100 + '%' } }))))),
+    const tplSec = h('div.sec', null, h('b', null, 'Templates'), h('div.tpl', null, TEMPLATES.map(t => h('button', { title: t.id === 'auto' ? `${t.label}: ${cams().length} camera(s)` : t.label,
+      class: t.n === tplSuggest || (t.id === 'auto' && tplSuggest > 6) ? 'sug' : '', onclick: () => applyTemplate(t) },
+      (t.id === 'auto' ? autoBoxes : t.boxes).map(b => h('i', { style: { left: b[0] * 100 + '%', top: b[1] * 100 + '%', width: b[2] * 100 + '%', height: b[3] * 100 + '%' } }))))),
       h('span.tiny.faint', null, 'Green = suggested for your camera count. Templates replace camera tiles and keep graphics.'));
     if (!s.length) return clear(insp, layoutSec, tplSec, h('div.sec', null, h('b', null, 'Shortcuts'), h('div.tiny.dim', null,
       'Drag to move · handles resize (Shift keeps ratio) · Shift-click multi-select · Ctrl+Z/Y undo/redo · Ctrl+D duplicate · Del delete · arrows nudge (Shift ×10) · Ctrl+G group · Ctrl+A all · Esc deselect')));

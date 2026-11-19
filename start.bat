@@ -18,9 +18,8 @@ if not exist frontend\dist\index.html (
 )
 if not exist .env copy .env.example .env >nul
 echo.
-echo   FestCast is starting. Open http://localhost:8420 on this PC.
+echo   FestCast is starting. The dashboard opens automatically (the address is printed below).
 echo   Keep this window open during the event. Closing it does NOT stop OBS recording.
 echo.
-start "" http://localhost:8420
-.venv\Scripts\python -m backend.main
+.venv\Scripts\python -m backend.main --open
 pause

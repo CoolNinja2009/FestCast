@@ -15,7 +15,7 @@ FestCast (FastAPI + dashboard) ── OBS WebSocket v5 ──┘   HDMI: OBS ful
    Settings → Video: 1920×1080, 30 fps. Settings → Output: Recording encoder NVENC H.264.
 2. Copy `.env.example` to `.env` and set `FESTCAST_OBS_PASSWORD`.
 3. *(TV output only)* `powershell -ExecutionPolicy Bypass -File scripts\get-mediamtx.ps1`
-4. Double-click **`start.bat`**, then open http://localhost:8420.
+4. Double-click **`start.bat`**. It picks a free port, prints the addresses and opens the dashboard.
 
 To try it without OBS, run `start-simulation.bat` (everything is labelled SIMULATION).
 

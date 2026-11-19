@@ -24,8 +24,15 @@
 
 ## Port
 
-FestCast uses port **8420** (`FESTCAST_PORT`). It refuses to start if another program already owns that port on
-127.0.0.1, because OBS's browser sources would otherwise reach that program instead of FestCast.
+Ports are automatic, so FestCast runs on any PC and any network without editing config. It prefers **8420** (and
+the port it used last time, so printed QR codes keep working), and moves to the next free port if another program
+owns it. "Owns" includes programs listening only on 127.0.0.1, which OBS's browser sources would otherwise reach
+instead of FestCast. The addresses are printed in the FestCast window and shown at the bottom left of the dashboard.
+MediaMTX ports (preferred 8889 / 8189 / 9997) are chosen the same way and shown on the Outputs page.
+Force a port with `FESTCAST_PORT=…` in `.env`.
+
+**New network / venue:** the phone/TV address follows the PC's current IP. Print the QR sheet and copy links
+*at the venue*, after the PC is on the festival network.
 
 ## Real-OBS smoke test
 
@@ -37,7 +44,7 @@ test layout. It never changes your programme scene.
 
 * Phones, TVs and the PC must be on the same network. The address phones use is shown at the bottom left of the
   dashboard. If it picks the wrong adapter (VPN/VirtualBox), set `FESTCAST_PUBLIC_HOST=192.168.x.x` in `.env`.
-* Windows Firewall: allow Python on **TCP 8420** (dashboard/links) and MediaMTX on **TCP 8889 + UDP 8189**
+* Windows Firewall: allow Python (dashboard/links) and MediaMTX (TV output) when Windows asks
   (TV output). Windows asks the first time; choose *Private networks*.
 * School Wi-Fi often isolates clients ("AP/client isolation"). If phones can't open the link, ask IT or use a
   dedicated router for the production.

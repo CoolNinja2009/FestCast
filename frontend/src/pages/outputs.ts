@@ -31,7 +31,8 @@ export function outputsPage(el: HTMLElement) {
           h('div.pb.col', null,
             !m.found ? h('div.banner.warn', null, 'MediaMTX is not installed. Run scripts\\get-mediamtx.ps1 (see docs/SETUP.md), then restart FestCast.') : null,
             h('dl.kv', null, h('dt', null, 'MediaMTX'), h('dd', null, pill(m.state)), h('dt', null, 'Stream ready'), h('dd', null, m.ready === undefined ? '—' : m.ready ? 'yes' : 'no'),
-              h('dt', null, 'Viewers'), h('dd', null, (m.readers || []).length), h('dt', null, 'Outgoing'), h('dd', null, kbps(m.out_kbps))),
+              h('dt', null, 'Viewers'), h('dd', null, (m.readers || []).length), h('dt', null, 'Outgoing'), h('dd', null, kbps(m.out_kbps)),
+              h('dt', null, 'Ports (auto)'), h('dd', null, m.ports ? `WebRTC ${m.ports.webrtc} · ICE ${m.ports.ice}` : '—')),
             h('div.row.wrap', null,
               o.programme_streaming ? h('button.btn.red', { onclick: async () => { if (await confirmBox('Stop TV output', 'TVs will lose the programme. Recording is not affected.', 'Stop')) act(() => api('POST', '/api/outputs/programme/stop'), 'Programme output stopped'); } }, 'Stop TV output')
                 : h('button.btn.green', { disabled: !obs.connected || !m.found, onclick: () => act(() => api('POST', '/api/outputs/programme/start'), 'Programme output started') }, 'Start TV output'),

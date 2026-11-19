@@ -1,9 +1,10 @@
 """Programme output: OBS --WHIP--> MediaMTX --WHEP--> TV browser receivers, plus HDMI projectors.
 
-MediaMTX endpoints verified in its docs (publish: /<path>/whip, read: /<path>/whep, port 8889, ICE UDP 8189).
+MediaMTX endpoints verified in its docs (publish: /<path>/whip, read: /<path>/whep). Its ports (WebRTC HTTP, ICE
+UDP/TCP, API) are chosen automatically at start: preferred 8889 / 8189 / 9997, else the next free ones.
 MediaMTX only accepts requests from this PC. TV receivers never talk to MediaMTX's HTTP API directly: their WHEP
 offer goes to FestCast (/api/public/tv/<token>/whep), which checks the receiver token and forwards it. The media then
-flows directly MediaMTX -> TV over UDP 8189. Revoking a receiver makes its token useless immediately."""
+flows directly MediaMTX -> TV over the ICE port. Revoking a receiver makes its token useless immediately."""
 from __future__ import annotations
 
 import asyncio
@@ -36,6 +37,7 @@ class OutputService:
         self.mtx_stats: dict[str, Any] = {}
         self._saved_service: dict | None = None
         self._watch: asyncio.Task | None = None
+        self.ports = {"webrtc": ctx.settings.mediamtx_webrtc_port, "ice": 8189, "api": 9997}
 
     # -- receivers ----------------------------------------------------------------------------------
     def receivers(self) -> list[Receiver]:
@@ -86,7 +88,7 @@ class OutputService:
         s = self.ctx.settings
         try:
             async with httpx.AsyncClient(timeout=10) as c:
-                r = await c.post(f"http://127.0.0.1:{s.mediamtx_webrtc_port}/{s.mediamtx_stream_path}/whep",
+                r = await c.post(f"http://127.0.0.1:{self.ports['webrtc']}/{s.mediamtx_stream_path}/whep",
                                  content=offer_sdp.encode(), headers={"Content-Type": "application/sdp"})
         except httpx.HTTPError as e:
             return 502, f"MediaMTX unreachable: {e}", None
@@ -97,7 +99,7 @@ class OutputService:
             return
         try:
             async with httpx.AsyncClient(timeout=5) as c:
-                await c.delete(f"http://127.0.0.1:{self.ctx.settings.mediamtx_webrtc_port}{session}")
+                await c.delete(f"http://127.0.0.1:{self.ports['webrtc']}{session}")
         except httpx.HTTPError:
             pass
 
@@ -128,15 +130,15 @@ class OutputService:
 logLevel: info
 logDestinations: [stdout]
 api: yes
-apiAddress: 127.0.0.1:9997
+apiAddress: 127.0.0.1:{self.ports['api']}
 rtsp: no
 rtmp: no
 hls: no
 srt: no
 webrtc: yes
-webrtcAddress: :{s.mediamtx_webrtc_port}
-webrtcLocalUDPAddress: :8189
-webrtcLocalTCPAddress: :8189
+webrtcAddress: :{self.ports['webrtc']}
+webrtcLocalUDPAddress: :{self.ports['ice']}
+webrtcLocalTCPAddress: :{self.ports['ice']}
 webrtcIPsFromInterfaces: yes
 webrtcAdditionalHosts: [{self.ctx.lan_ip}]
 authMethod: internal
@@ -152,6 +154,27 @@ paths:
   all_others:
 """
 
+    def choose_ports(self) -> None:
+        """Pick free ports for MediaMTX (remembered between runs so nothing moves unless it must)."""
+        from ..core import ports as P
+        d = self.ctx.settings.data_dir
+        last = P.remembered(d)
+        own = {self.ctx.settings.port}
+        web = P.pick([last.get("mtx_webrtc"), self.ctx.settings.mediamtx_webrtc_port], range(8890, 8990), avoid=own)
+        own.add(web)
+        api = P.pick([last.get("mtx_api"), 9997], range(9998, 10100), avoid=own)
+        own.add(api)
+        ice = None
+        for cand in [last.get("mtx_ice"), 8189, *range(8190, 8290)]:
+            if cand and cand not in own and P.udp_free(cand) and P.tcp_free(cand):
+                ice = cand
+                break
+        ice = ice or P.pick([], range(0), udp=True, avoid=own)
+        if (web, ice, api) != (self.ports["webrtc"], self.ports["ice"], self.ports["api"]):
+            log.info("MediaMTX ports: webrtc %s, ice %s, api %s", web, ice, api)
+        self.ports = {"webrtc": web, "ice": ice, "api": api}
+        P.remember(d, mtx_webrtc=web, mtx_api=api, mtx_ice=ice)
+
     async def start_mtx(self) -> None:
         exe = self.ctx.settings.mediamtx
         if not exe:
@@ -161,6 +184,7 @@ paths:
                              "tools\\mediamtx\\) - see docs/SETUP.md")
         if self.proc and self.proc.returncode is None:
             return
+        self.choose_ports()
         cfg = self.ctx.settings.data_dir / "mediamtx.yml"
         cfg.write_text(self.mtx_config(), "utf-8")
         self.want_mtx = True
@@ -224,8 +248,8 @@ paths:
         s = self.ctx.settings
         try:
             async with httpx.AsyncClient(timeout=2) as c:
-                p = (await c.get(f"http://127.0.0.1:9997/v3/paths/get/{s.mediamtx_stream_path}"))
-                sess = (await c.get("http://127.0.0.1:9997/v3/webrtcsessions/list"))
+                p = (await c.get(f"http://127.0.0.1:{self.ports['api']}/v3/paths/get/{s.mediamtx_stream_path}"))
+                sess = (await c.get(f"http://127.0.0.1:{self.ports['api']}/v3/webrtcsessions/list"))
             path = p.json() if p.status_code == 200 else {}
             sessions = sess.json().get("items", []) if sess.status_code == 200 else []
             t = time.time()
@@ -264,7 +288,7 @@ paths:
         s = self.ctx.settings
         await obs.call("SetStreamServiceSettings", {
             "streamServiceType": "whip_custom",
-            "streamServiceSettings": {"server": f"http://127.0.0.1:{s.mediamtx_webrtc_port}/{s.mediamtx_stream_path}"
+            "streamServiceSettings": {"server": f"http://127.0.0.1:{self.ports['webrtc']}/{s.mediamtx_stream_path}"
                                                 f"/whip", "bearer_token": ""}})
         await obs.call("StartStream")
         log.info("programme publishing to MediaMTX via WHIP")
@@ -308,6 +332,7 @@ paths:
                          **{k: st.get(k) for k in ("width", "height", "fps", "bitrate_kbps", "jitter_ms",
                                                    "packets_lost", "rtt_ms", "error", "last_seen", "failures")}})
         return {"receivers": recs, "mediamtx": {"state": self.mtx_state, "found": bool(self.ctx.settings.mediamtx),
+                                                "ports": self.ports,
                                                 "log": list(self.mtx_log)[-30:],
                                                 **{k: v for k, v in self.mtx_stats.items() if not k.startswith("_")}},
                 "programme_streaming": self.ctx.obs.state.get("streaming")}

@@ -44,7 +44,7 @@ receiver/tv.html          TV WHEP player
   `?push=<random id>&password=<production secret>`; OBS pulls `?view=<id>&password=…`. The FestCast production is the
   logical room. Parameters (`push`, `view`, `password`, `label`, `webcam`, `facing=rear`, `width`, `height`, `fps`,
   `videobitrate`, `cleanoutput`) were checked in vdo.ninja `main.js`.
-* **OBS-side probe.** Each camera's OBS browser source loads `http://127.0.0.1:8420/obs/cam/<id>`, which embeds the
+* **OBS-side probe.** Each camera's OBS browser source loads `http://127.0.0.1:<port>/obs/cam/<id>`, which embeds the
   VDO.Ninja viewer and asks it for stats through the documented IFRAME API (`postMessage({getStats:true})` →
   `{stats:{inbound:{…}}}`, verified live). So camera health is real and measured even with no dashboard open, and the
   stream id can rotate (revocation) without touching the OBS source.

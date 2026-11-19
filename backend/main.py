@@ -83,6 +83,7 @@ def main() -> None:
     ap.add_argument("--simulation", action="store_true", help="use the in-memory OBS simulator")
     ap.add_argument("--port", type=int)
     ap.add_argument("--data-dir")
+    ap.add_argument("--open", action="store_true", help="open the dashboard in the browser once started")
     a = ap.parse_args()
     if a.simulation:
         os.environ["FESTCAST_SIMULATION"] = "true"
@@ -92,16 +93,22 @@ def main() -> None:
         os.environ["FESTCAST_DATA_DIR"] = a.data_dir
     get_settings.cache_clear()
     s = get_settings()
-    import socket
-    import sys
+    from .core import ports as P
+    from .services.metrics import lan_ip
 
-    with socket.socket() as probe:
-        probe.settimeout(0.5)
-        if probe.connect_ex(("127.0.0.1", s.port)) == 0:
-            # On Windows a 0.0.0.0 bind can succeed while another program owns 127.0.0.1:<port>; OBS would then
-            # talk to that program instead of FestCast. Refuse to start rather than fail silently.
-            sys.exit(f"FestCast: port {s.port} is already used by another program on this PC. "
-                     f"Close it, or set FESTCAST_PORT to a free port in .env.")
+    wanted = s.port or None
+    last = P.remembered(s.data_dir).get("port")
+    s.port = P.pick([wanted, last, 8420], range(8421, 8500))
+    if wanted and s.port != wanted:
+        print(f"FestCast: port {wanted} is busy (another program); using {s.port} instead.", flush=True)
+    P.remember(s.data_dir, port=s.port)
+    host = s.public_host or lan_ip()
+    local_url = f"http://localhost:{s.port}"
+    print(f"\n  FestCast dashboard:  {local_url}\n  Phones / TVs reach:  http://{host}:{s.port}\n", flush=True)
+    if a.open:
+        import threading
+        import webbrowser
+        threading.Timer(1.5, lambda: webbrowser.open(local_url)).start()
     uvicorn.run(create_app(s), host=s.host, port=s.port, log_level="warning", ws_ping_interval=20)
 
 

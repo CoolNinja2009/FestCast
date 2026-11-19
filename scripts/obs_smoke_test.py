@@ -9,14 +9,18 @@ It never switches your programme scene and never deletes anything FestCast did n
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
 
 import httpx
 
-BASE = "http://127.0.0.1:8420"
 ROOT = Path(__file__).resolve().parent.parent
+try:  # FestCast picks its port automatically and records it here
+    BASE = f"http://127.0.0.1:{json.loads((ROOT / 'data' / 'ports.json').read_text())['port']}"
+except (OSError, ValueError, KeyError):
+    BASE = "http://127.0.0.1:8420"
 ok_all = True
 
 
@@ -46,7 +50,8 @@ def main() -> int:
           + ("" if (W, H, v.get("fps")) == (1920, 1080, 30) else "  (production target is 1920x1080 @ 30)"))
 
     print("2. Production + camera sources")
-    if not st["cameras"]["production"]:
+    created_production = not st["cameras"]["production"]
+    if created_production:
         c.post("/api/production", json={"name": "Smoke test", "cameras": 3}).raise_for_status()
     cams = c.get("/api/state").json()["cameras"]["cameras"]
     scenes = {s["name"]: s["owned"] for s in c.get("/api/scenes").json()}
@@ -110,6 +115,10 @@ def main() -> int:
 
     if not a.keep:
         c.delete(f"/api/layouts/{lay['id']}")
+        if created_production:
+            c.delete("/api/production")  # removes the test cameras and their OBS sources
+        import shutil
+        shutil.rmtree(ROOT / "data" / "smoke-recordings", ignore_errors=True)  # only the test clip
     print("\nRESULT:", "ALL PASSED" if ok_all else "SOME CHECKS FAILED")
     return 0 if ok_all else 1
 

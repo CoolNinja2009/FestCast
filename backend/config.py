@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FESTCAST_", env_file=str(ROOT / ".env"), extra="ignore")
 
     host: str = "0.0.0.0"
-    port: int = 8420
+    # 0 = automatic: last used port, else 8420, else the next free one (see core/ports.py)
+    port: int = 0
     data_dir: Path = ROOT / "data"
     # Dashboard access from other machines needs this password. Requests from this PC (127.0.0.1) are always allowed.
     admin_password: str = ""
