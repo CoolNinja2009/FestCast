@@ -33,6 +33,12 @@ def obs_only(request: Request, k: str | None) -> None:
         raise HTTPException(403, "OBS pages are only available on the production PC")
 
 
+# -- operator manual (works offline at the venue) -------------------------------------------------------------
+@router.get("/manual")
+async def manual():
+    return page(PAGES / "manual.html")
+
+
 # -- camera operators --------------------------------------------------------------------------------------------
 @router.get("/join/{token}")
 async def join_page(token: str):

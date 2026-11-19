@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FestCast manual</title>
+<style>
+:root{--bg:#0e1013;--panel:#15171b;--line:#262a31;--text:#e7e9ec;--dim:#a8aeb7;--faint:#6f7681;--red:#e5484d;--green:#30a46c;--amber:#f0a63a;--blue:#8ab4ff}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif}
+.wrap{display:grid;grid-template-columns:250px minmax(0,1fr);max-width:1180px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line)}
+nav b{display:block;letter-spacing:.16em;font-size:12px;margin-bottom:14px}
+nav b i{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);margin-right:8px}
+nav a{display:block;color:var(--dim);text-decoration:none;padding:4px 8px;border-radius:5px;font-size:13.5px}
+nav a:hover{background:var(--panel);color:var(--text)}
+nav .back{margin-top:18px;color:var(--blue)}
+main{padding:34px 44px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 6px;letter-spacing:-.01em}
+h2{font-size:21px;margin:46px 0 10px;padding-top:10px;border-top:1px solid var(--line)}
+h3{font-size:16px;margin:24px 0 6px}
+p,li{color:#d6d9de}
+.lead{color:var(--dim);font-size:16px;margin-top:0}
+code,kbd{font-family:"Cascadia Mono",Consolas,monospace;font-size:13px}
+code{background:#1c2026;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+kbd{border:1px solid #3a404a;border-bottom-width:2px;border-radius:4px;padding:0 5px;background:#1a1d22}
+.b{display:inline-block;font-weight:650;font-size:12.5px;padding:1px 8px;border-radius:5px;background:#252a31;border:1px solid #363c46;white-space:nowrap}
+.b.red{background:var(--red);border-color:var(--red);color:#fff}.b.green{background:var(--green);border-color:var(--green);color:#fff}
+.b.amber{background:#3b2c14;border-color:var(--amber);color:var(--amber)}
+.box{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:6px;padding:12px 16px;margin:14px 0}
+.box.warn{border-left-color:var(--amber)}.box.bad{border-left-color:var(--red)}.box.ok{border-left-color:var(--green)}
+.box p:first-child{margin-top:0}.box p:last-child{margin-bottom:0}
+table{width:100%;border-collapse:collapse;margin:10px 0 16px;font-size:14px}
+th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);border-bottom:1px solid var(--line);padding:6px 8px}
+td{border-bottom:1px solid var(--line);padding:8px;vertical-align:top}
+ol.steps{counter-reset:s;list-style:none;padding:0}
+ol.steps>li{counter-increment:s;position:relative;padding:2px 0 10px 40px}
+ol.steps>li::before{content:counter(s);position:absolute;left:0;top:2px;width:26px;height:26px;border-radius:50%;background:#252a31;border:1px solid #3a404a;text-align:center;line-height:24px;font-weight:700;font-size:13px}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:14px 0;font-size:13.5px}
+.flow span{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+.flow em{color:var(--faint);font-style:normal}
+.check li{list-style:none;margin-left:-20px}.check li::before{content:"☐ ";color:var(--dim)}
+.sheet{background:#fff;color:#111;border-radius:8px;padding:26px 30px;margin:16px 0}
+.sheet h3{margin-top:0;font-size:22px}.sheet li,.sheet p{color:#222}
+.print{float:right;background:#252a31;color:var(--text);border:1px solid #3a404a;border-radius:6px;padding:6px 12px;cursor:pointer}
+@media (max-width:860px){.wrap{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:22px 16px 60px}}
+@media print{
+  body{background:#fff;color:#000;font-size:11.5pt}
+  nav,.print{display:none}.wrap{display:block}main{padding:0}
+  p,li,td{color:#111}h2{border-top:1px solid #bbb;page-break-after:avoid}
+  .box{background:#f5f5f5;border-color:#ccc}code,kbd{background:#eee;border-color:#ccc;color:#000}
+  .b{background:#eee;border-color:#999;color:#000}.b.red{background:#fdd;color:#900}.b.green{background:#dfd;color:#060}
+  .sheet{border:1px solid #999;page-break-before:always}
+  .flow span{background:#f3f3f3;border-color:#bbb}
+  a{color:#000;text-decoration:none}
+}
+</style></head>
+<body><div class="wrap">
+<nav>
+  <b><i></i>FESTCAST MANUAL</b>
+  <a href="#overview">1. How it fits together</a>
+  <a href="#install">2. One-time setup</a>
+  <a href="#daybefore">3. The day before</a>
+  <a href="#startup">4. Event day: start-up</a>
+  <a href="#cameras">5. Cameras</a>
+  <a href="#production">6. Switching &amp; layouts</a>
+  <a href="#standby">7. Standby &amp; presentations</a>
+  <a href="#recording">8. Recording</a>
+  <a href="#tv">9. TV output (wireless &amp; HDMI)</a>
+  <a href="#audio">10. Audio</a>
+  <a href="#during">11. During the show</a>
+  <a href="#problems">12. When something goes wrong</a>
+  <a href="#after">13. After the show</a>
+  <a href="#keys">14. Keyboard shortcuts</a>
+  <a href="#operators">15. Camera operator sheet</a>
+  <a href="#glossary">16. Glossary</a>
+  <a class="back" href="/">← Back to the dashboard</a>
+</nav>
+<main>
+<button class="print" onclick="print()">Print / save PDF</button>
+<h1>FestCast manual</h1>
+<p class="lead">Everything the producer needs to run the festival broadcast: from first install to the end of a
+9-hour show. Section 15 is a one-page sheet to print for the camera operators.</p>
+
+<h2 id="overview">1. How it fits together</h2>
+<div class="flow"><span>📱 Phones</span><em>→ VDO.Ninja →</em><span>OBS (mixes the show)</span><em>→</em><span>💾 Recording</span><em>+</em><span>📺 TV (wireless or HDMI)</span></div>
+<ul>
+  <li><b>FestCast</b> is the control panel. It sets everything up and tells OBS what to do.</li>
+  <li><b>OBS</b> does the real work: mixing the picture, recording, sending to the TV. If FestCast's window closes,
+      OBS keeps recording.</li>
+  <li><b>VDO.Ninja</b> carries each phone's video to the PC through a link you send the operator. No app needed.</li>
+  <li><b>MediaMTX</b> sends the finished show to the TV's web browser over your network.</li>
+</ul>
+<div class="box"><p>The dashboard has 8 pages (shortcut keys <kbd>1</kbd>–<kbd>8</kbd>): <b>Overview</b>, <b>Cameras</b>,
+<b>Production</b>, <b>Presentations</b>, <b>Outputs</b>, <b>Recordings</b>, <b>Network</b>, <b>Settings</b>.
+The top bar always shows OBS status, what's on air (<span class="b red">PGM</span>), recording time, and the big
+<span class="b amber">STANDBY</span> emergency button.</p></div>
+
+<h2 id="install">2. One-time setup</h2>
+<ol class="steps">
+  <li><b>OBS WebSocket:</b> in OBS open <i>Tools → WebSocket Server Settings</i>, tick <i>Enable WebSocket
+      server</i>, keep port 4455, tick <i>Enable Authentication</i>, copy the password, press <b>Apply</b>.</li>
+  <li><b>Password into FestCast:</b> in the FestCast folder copy <code>.env.example</code> to <code>.env</code> and
+      set <code>FESTCAST_OBS_PASSWORD=</code> to that password.</li>
+  <li><b>OBS video (recommended):</b> <i>Settings → Video</i>: base and output 1920×1080, 30 fps. (FestCast also
+      works with other canvas sizes; 30 fps halves the recording size and the PC load.)</li>
+  <li><b>TV output:</b> run <code>powershell -ExecutionPolicy Bypass -File scripts\get-mediamtx.ps1</code> once
+      (downloads MediaMTX and checks its checksum).</li>
+  <li><b>Start FestCast:</b> double-click <code>start.bat</code>. It picks a free port, prints the addresses and opens
+      the dashboard. Keep that black window open.</li>
+</ol>
+<div class="box"><p><b>Controlling from another laptop/tablet:</b> set <code>FESTCAST_ADMIN_PASSWORD=</code> in
+<code>.env</code>, restart, and open the "Phones / TVs reach" address on the other device. Without a password only
+the production PC can control FestCast.</p></div>
+
+<h2 id="daybefore">3. The day before</h2>
+<ul class="check">
+  <li>Full rehearsal with the real phones, the real TV and the real network (see the checklist in <code>docs/SETUP.md</code>).</li>
+  <li>Optional overnight test: with FestCast running from <code>start.bat</code>, run
+      <code>.venv\Scripts\python scripts\soak_test.py --minutes 540</code>. It runs a 9-hour rehearsal on its own
+      and prints PASS/FAIL plus memory trends, then cleans up.</li>
+  <li>Charge every phone and power bank. Phones need a power bank for a 9-hour show.</li>
+  <li>Windows: <i>Settings → Windows Update → Pause updates</i>. An update restart would end the show.</li>
+  <li>Choose the recording drive: 9 hours of 1080p can need 100–200 GB. Use your biggest drive.</li>
+  <li>Print the camera operator sheet (section 15) and, at the venue, the QR sheet (section 5).</li>
+</ul>
+
+<h2 id="startup">4. Event day: start-up (in this order)</h2>
+<ol class="steps">
+  <li>Connect the PC to the festival network (cable if possible). <b>Do this before starting FestCast</b>: phone and
+      TV links use the PC's address on <i>this</i> network.</li>
+  <li>Turn on <i>Do not disturb</i>; close games, Discord, Steam; plug the PC in.</li>
+  <li>Open <b>OBS</b>, then double-click <b>start.bat</b>. The top bar must show <span class="b">OBS 33.x</span>, not
+      <span class="b red">OBS DOWN</span>.</li>
+  <li><b>Cameras → Create production</b> (if not created yet). Enter the event name and the number of cameras.</li>
+  <li>Send each operator their link or let them scan their QR code (section 5).</li>
+  <li><b>Recordings:</b> pick the drive, set <i>Show length</i> to 9, <b>Save</b>, <b>Apply to OBS &amp; verify</b>.</li>
+  <li><b>Outputs:</b> open the TV link on the TV, press <b>Start TV output</b>.</li>
+  <li><b>Production:</b> build or pick your layout, preview it, <b>TAKE</b>.</li>
+  <li><b>Overview → Start production</b>. Recording starts automatically if "auto-start" is on (it is by default).</li>
+</ol>
+
+<h2 id="cameras">5. Cameras</h2>
+<h3>Inviting operators</h3>
+<p>Each camera slot has its own private link. On the Cameras page:</p>
+<table>
+<tr><th>Button</th><th>What it does</th></tr>
+<tr><td><span class="b">Copy link</span> / <span class="b">QR</span></td><td>The operator's invitation. Send by chat or let them scan. Contains no passwords.</td></tr>
+<tr><td><span class="b">Print QR sheet</span></td><td>One page with every camera's QR code. Print it <b>at the venue</b>.</td></tr>
+<tr><td><span class="b">+ Add camera</span></td><td>Adds another slot at any time, even mid-show. Other cameras are not touched.</td></tr>
+<tr><td><span class="b">Revoke</span></td><td>Kills that link and disconnects whoever is using it; a new link is made. Use if a link leaks.</td></tr>
+</table>
+<h3>Reading a camera card</h3>
+<table>
+<tr><th>Status</th><th>Meaning</th></tr>
+<tr><td><span class="b green">Live</span></td><td>Video is arriving. The numbers are what OBS actually receives.</td></tr>
+<tr><td>Waiting for phone</td><td>Ready, but the operator hasn't pressed Start yet.</td></tr>
+<tr><td>Disconnected</td><td>The phone stopped sending (screen locked, app switched, Wi-Fi lost). <b>The show is not switched away automatically.</b> After 45 s FestCast also re-opens that camera's viewer by itself.</td></tr>
+<tr><td>Not monitored</td><td>OBS isn't running this camera's source yet (only right after start-up).</td></tr>
+</table>
+<p>A dash <b>—</b> means "not measured", never zero. A yellow line under a card explains a problem and what to do.</p>
+<h3>Camera controls</h3>
+<table>
+<tr><td><span class="b">1080p ▾</span></td><td>Quality target. Changing it needs the operator to re-open their link. The card warns if less is received.</td></tr>
+<tr><td><span class="b">⟳ 0°</span></td><td><b>Rotate</b> 90° per click. Fixes sideways pictures from iPhones with Portrait Orientation Lock on.</td></tr>
+<tr><td><span class="b">Fit</span> / <span class="b">Fill</span></td><td>Fit shows the whole picture (bars if needed); Fill crops to fill the 16:9 frame.</td></tr>
+<tr><td><span class="b">Reconnect</span></td><td>Restarts OBS's viewer for that camera (try this first if a picture freezes).</td></tr>
+<tr><td><span class="b">Use audio</span></td><td>Makes this phone's microphone live in the show (all phone mics are muted by default).</td></tr>
+<tr><td><span class="b">Live</span></td><td>Cuts this camera full-screen to the show (asks to confirm before the production starts).</td></tr>
+<tr><td><span class="b">Settings</span></td><td>Name, quality, bitrate and the raw connection statistics.</td></tr>
+<tr><td><span class="b">Disable</span> / <span class="b">Remove</span></td><td>Pause a slot, or delete it with its OBS source.</td></tr>
+</table>
+
+<h2 id="production">6. Switching &amp; layouts (Production page)</h2>
+<h3>Preview → programme</h3>
+<ol class="steps">
+  <li>Click a scene button: it goes to <span class="b green">PVW</span> (preview, green, not on air).</li>
+  <li>Check it in the preview monitor.</li>
+  <li>Press <span class="b red">CUT</span> (instant) or <span class="b">TAKE</span> (with the chosen transition, e.g. Fade 500 ms). It is now on <span class="b red">PGM</span> (on air, red).</li>
+</ol>
+<p>Shortcuts: <b>double-click</b> a scene = straight on air. <i>Direct cut</i> tick-box = single click goes on air.</p>
+<h3>Layouts (the visual editor)</h3>
+<p>A layout is a full screen design, for example two cameras side by side with a name banner. Each layout becomes a real
+OBS scene.</p>
+<ol class="steps">
+  <li><b>+</b> next to LAYOUTS → name it.</li>
+  <li>Pick a <b>template</b> (green = suggested for your camera count; there are templates up to 6 cameras and
+      <i>All cameras</i> for any number), or drag cameras from <b>ADD</b> onto the canvas.</li>
+  <li>Drag to move, pull the white handles to resize (hold <kbd>Shift</kbd> to keep the shape). Add
+      <b>Text</b>, <b>Shape</b>, <b>Image / logo</b> or a ready-made <b>Lower third</b> (name banner).</li>
+  <li>Fine-tune on the right: exact position, crop, fit, colours, lock, hide, layer order.</li>
+  <li>Changes save and sync to OBS automatically ("Synced to OBS" under the canvas).</li>
+  <li><b>Preview</b> then <b>Take live</b> when ready.</li>
+</ol>
+<div class="box warn"><p><b>Editing a layout that is on air:</b> by default your changes are held. Press
+<span class="b red">Push changes to air</span> when you're happy. Untick the option to edit live directly.</p></div>
+<p>Layouts can be duplicated, exported to a file and imported. <b>Check OBS</b> shows exactly what OBS has.</p>
+
+<h2 id="standby">7. Standby &amp; presentations</h2>
+<p>Standby is the "we'll be right back" screen: your slideshow, or a branded card with the event name and a clock.</p>
+<ul>
+  <li><span class="b amber">STANDBY</span> in the top bar or <b>ACTIVATE STANDBY</b> puts it on air immediately.</li>
+  <li><b>Return to production</b> goes back to the scene that was on air before (or choose one).</li>
+  <li><b>Automatic standby</b> (Production → Standby): only when the production is started and <b>no</b> camera is
+      live for the grace period (default 15 s). One camera dropping while another works never triggers it.
+      Returning is manual unless you tick the auto-return option.</li>
+  <li><b>Scheduled intermissions:</b> add times (e.g. Lunch 12:30–13:15) and standby comes on by itself.</li>
+</ul>
+<h3>Presentations</h3>
+<ol class="steps">
+  <li><b>Presentations</b> page → drop a PDF, PowerPoint or images. PowerPoint needs LibreOffice installed;
+      otherwise save it as PDF from PowerPoint first. (Animations don't carry over.)</li>
+  <li>Drag slides to reorder, untick to skip, set seconds per slide, transition, background, branding text.</li>
+  <li><b>Preview</b>, then <b>Use for standby</b>.</li>
+</ol>
+
+<h2 id="recording">8. Recording</h2>
+<ul>
+  <li>OBS records; FestCast only shows <span class="b red">REC</span> when OBS has <b>confirmed</b> it.</li>
+  <li>Files: <code>&lt;your folder&gt;\YYYY-MM-DD\Event_HHMMSS.mkv</code> plus a <code>metadata.json</code>.
+      MKV survives crashes and power cuts (you lose seconds, not the file).</li>
+  <li><b>Apply to OBS &amp; verify</b> shows what you asked for next to what OBS really uses (green = matches).</li>
+  <li>After each recording the History shows what's really in the file (e.g. <code>h264 1920×1080 aac</code>).</li>
+  <li><b>Show length</b>: FestCast measures the real recording rate and warns early if the drive would fill before the end.</li>
+  <li><b>Remux → MP4</b> converts a finished MKV to MP4 without quality loss (for editing or sharing).</li>
+</ul>
+<div class="box bad"><p>Do not record to a nearly full drive. Rule of thumb: <b>GB needed for 9 h ≈ the bitrate in Mb/s × 4</b>
+(e.g. 40 Mb/s → about 160 GB). The Recordings page shows the live bitrate after a minute.</p></div>
+
+<h2 id="tv">9. TV output</h2>
+<h3>Wireless TV</h3>
+<ol class="steps">
+  <li><b>Outputs → + Wireless TV</b>, give it a name.</li>
+  <li>On the TV's web browser open its link or scan its <b>QR</b>. (TV with only a Chromecast: open the link in
+      Chrome on a laptop → ⋮ → <i>Cast… → Cast tab</i>.)</li>
+  <li>Press <b>Start TV output</b>. The picture arrives within seconds. If you see <span class="b">🔊 Tap for sound</span>, tap once.</li>
+</ol>
+<p>The TV reconnects by itself. If the stream ever stops, FestCast restarts it automatically (even after a FestCast
+crash, the TV keeps playing). <b>Revoke</b> cuts a TV off instantly. Note: while the TV output is on, OBS can't stream
+to YouTube etc. at the same time.</p>
+<h3>HDMI</h3>
+<ol class="steps">
+  <li>Connect the TV/projector to the PC by HDMI (Windows sees a second screen).</li>
+  <li><b>Outputs → + HDMI projector</b>, choose that screen, <b>Open projector</b>: OBS shows the clean show full-screen there.</li>
+</ol>
+<p>Also possible without FestCast: an HDMI splitter, or Windows wireless display (<kbd>Win</kbd>+<kbd>K</kbd>, choose
+the TV, set <i>Extend</i>, then use + HDMI projector on that screen).</p>
+
+<h2 id="audio">10. Audio</h2>
+<ul>
+  <li>Production → <b>Audio</b>: live meters, mute, volume, sync offset and monitoring for every OBS audio source.</li>
+  <li>Phone microphones are muted by default; choose one with <b>Use audio</b> on its camera card. Nothing switches automatically.</li>
+  <li>A red strip / warning means <b>clipping</b>: lower that source's volume.</li>
+  <li>Use a proper microphone or mixer into the PC for speech and music; phone mics are a backup.</li>
+</ul>
+<div class="box warn"><p>Don't play the show's sound through the production PC's speakers while OBS captures
+"Desktop Audio": it loops back as an echo or hum. Use headphones for monitoring.</p></div>
+
+<h2 id="during">11. During the show: what to watch</h2>
+<table>
+<tr><th>Where</th><th>Healthy</th><th>Act if</th></tr>
+<tr><td>Top bar</td><td>OBS 33.x · PGM scene · REC timer running</td><td>OBS DOWN, NOT RECORDING</td></tr>
+<tr><td>Overview → Cameras</td><td>3/3 live, about 30 fps, a few Mb/s each</td><td>a camera disconnected or below target</td></tr>
+<tr><td>Overview → Storage</td><td>hours left &gt; hours of show left</td><td>warning about the drive filling</td></tr>
+<tr><td>Overview → OBS</td><td>fps steady, 0 skipped frames</td><td>skipped frames rising (PC overloaded)</td></tr>
+<tr><td>Overview → TV receivers</td><td>1/1</td><td>0/1 for more than a minute</td></tr>
+<tr><td>Notifications</td><td>quiet</td><td>anything yellow or red; they say what to do</td></tr>
+</table>
+<p>Every hour or so: check the phones' batteries and temperature, and the recording file is growing (Recordings page).</p>
+
+<h2 id="problems">12. When something goes wrong</h2>
+<div class="box ok"><p><b>Golden rule:</b> if in doubt, press <span class="b amber">STANDBY</span>. The audience sees a
+clean "we'll be right back" screen while you fix things. Recording continues.</p></div>
+<table>
+<tr><th>Problem</th><th>Do this</th></tr>
+<tr><td>A camera shows Disconnected</td><td>Ask the operator to unlock the phone and bring the camera page back to the front. Still nothing after a minute: they re-open their link. Then press <b>Reconnect</b>.</td></tr>
+<tr><td>Picture sideways / tall with black bars</td><td>Press <b>⟳ Rotate</b> on the card. Or the operator turns Portrait Orientation Lock off and re-opens the link.</td></tr>
+<tr><td>Picture blurry / below 1080p</td><td>Phone too far from the router, too hot, or on the front/ultra-wide lens. Move closer or cool it; or set that camera to 720p for a steadier picture.</td></tr>
+<tr><td>Phone link says "invalid"</td><td>It was revoked or expired (48 h). Copy a fresh link from the card.</td></tr>
+<tr><td>Phone can't open the link at all</td><td>Phone not on the same network, or the Wi-Fi blocks devices from seeing each other. Use the production router.</td></tr>
+<tr><td>Top bar says OBS DOWN</td><td>OBS closed or crashed: start OBS again. FestCast reconnects and restores everything by itself.</td></tr>
+<tr><td>FestCast window shows "stopped unexpectedly"</td><td>Nothing: it restarts by itself in 3 s. OBS keeps recording, the TV keeps playing. Reload the dashboard.</td></tr>
+<tr><td>Dashboard says "Dashboard offline"</td><td>Usually the browser lost connection; it reconnects by itself. The show is not affected.</td></tr>
+<tr><td>TV says "Waiting for the programme"</td><td>Press <b>Start TV output</b>. Check the MediaMTX log on the Outputs page.</td></tr>
+<tr><td>TV picture but no sound</td><td>Tap the TV screen once.</td></tr>
+<tr><td>Recording stopped warning</td><td>Check the drive (space, unplugged?) and OBS for an error, then press Start recording again. A new file is made; the old one is kept.</td></tr>
+<tr><td>Echo or hum from the PC speakers</td><td>Mute the speakers or Desktop Audio (section 10).</td></tr>
+</table>
+<p>Settings → <b>Download support bundle</b> saves the logs (with passwords and links removed) for later investigation.</p>
+
+<h2 id="after">13. After the show</h2>
+<ol class="steps">
+  <li><b>Return to production</b> or standby for the end card, then stop the recording (Recordings → <b>Stop recording</b>).</li>
+  <li>Check History says <b>finished</b> and shows the real video format.</li>
+  <li>Optional: <b>Remux → MP4</b> for easier sharing.</li>
+  <li>Outputs → <b>Stop TV output</b> (this also puts OBS's own stream settings back).</li>
+  <li>Cameras → <b>Close production</b> when you're done for good (invitations stop working; layouts and recordings are kept).</li>
+  <li>Close the FestCast window, then OBS. Copy the recordings somewhere safe.</li>
+</ol>
+
+<h2 id="keys">14. Keyboard shortcuts</h2>
+<table>
+<tr><td><kbd>1</kbd>…<kbd>8</kbd></td><td>Switch dashboard page (not inside the Production page)</td></tr>
+<tr><td colspan="2"><b>Layout editor</b></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Undo / redo</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Del</kbd></td><td>Duplicate · delete selection</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Copy / paste elements</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd> · <kbd>Esc</kbd></td><td>Select all · deselect</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></td><td>Group / ungroup</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd></td><td>Bring to front / send to back</td></tr>
+<tr><td>Arrow keys (+<kbd>Shift</kbd>)</td><td>Nudge 1 px (10 px)</td></tr>
+<tr><td><kbd>Shift</kbd>+click · <kbd>Shift</kbd>+drag a corner</td><td>Multi-select · resize keeping the shape</td></tr>
+</table>
+
+<h2 id="operators">15. Camera operator sheet</h2>
+<p>Print this page for every camera operator.</p>
+<div class="sheet">
+<h3>📱 You are a FestCast camera</h3>
+<p><b>Before you start</b></p>
+<ol>
+  <li>Join the <b>festival Wi-Fi</b>. Stay close to the router.</li>
+  <li><b>iPhone:</b> Control Center → turn <b>Portrait Orientation Lock OFF</b>. <b>Android:</b> Auto-rotate ON.</li>
+  <li>Settings: <b>Auto-Lock / screen timeout → Never</b>. <b>Low Power Mode OFF</b>. Do not disturb ON.</li>
+  <li>Plug into a <b>power bank</b>. Keep the phone out of direct sun and hot stage lights.</li>
+</ol>
+<p><b>Go live</b></p>
+<ol>
+  <li>Scan your QR code (or open your link) in <b>Safari</b> (iPhone) or <b>Chrome</b> (Android).</li>
+  <li>Tap <b>Open camera</b> → <b>Allow</b> the camera.</li>
+  <li>Choose the <b>rear camera</b>. Microphone: <b>no audio</b> unless the producer asks.</li>
+  <li>Hold the phone <b>sideways (landscape)</b>, check the preview, tap <b>Start</b>.</li>
+</ol>
+<p><b>While filming</b></p>
+<ul>
+  <li><b>Never</b> lock the screen or switch apps: the camera stops.</li>
+  <li>Move smoothly, hold still on the action, keep it level.</li>
+  <li>If your picture stops: unlock, bring the browser back, or re-open your link.</li>
+  <li>To stop: tap <b>Hang up</b> or close the tab.</li>
+</ul>
+</div>
+
+<h2 id="glossary">16. Glossary</h2>
+<table>
+<tr><td><b>Programme (PGM)</b></td><td>What the audience sees and what gets recorded. Red.</td></tr>
+<tr><td><b>Preview (PVW)</b></td><td>The next shot, prepared but not on air. Green.</td></tr>
+<tr><td><b>Cut / Take</b></td><td>Swap preview to programme: instantly (Cut) or with a transition (Take).</td></tr>
+<tr><td><b>Layout / scene</b></td><td>A designed screen (cameras + graphics). Each layout is an OBS scene.</td></tr>
+<tr><td><b>Standby</b></td><td>The "we'll be right back" screen or slideshow.</td></tr>
+<tr><td><b>Lower third</b></td><td>A name banner in the bottom part of the screen.</td></tr>
+<tr><td><b>Bitrate (Mb/s)</b></td><td>How much data per second; higher = better picture, bigger files.</td></tr>
+<tr><td><b>Remux</b></td><td>Change the file container (MKV → MP4) without re-encoding: no quality loss.</td></tr>
+<tr><td><b>MediaMTX</b></td><td>The small local server that sends the show to TV browsers.</td></tr>
+<tr><td><b>VDO.Ninja</b></td><td>The free service that carries phone video to OBS through a web link.</td></tr>
+</table>
+<p style="color:var(--faint);margin-top:40px">FestCast · operator manual. Technical setup and the rehearsal checklist: <code>docs/SETUP.md</code>; design notes: <code>docs/ARCHITECTURE.md</code>.</p>
+</main></div></body></html>

@@ -22,6 +22,11 @@ To try it without OBS, run `start-simulation.bat` (everything is labelled SIMULA
 Fedora: `./start.sh` (needs python3.12+, nodejs, obs-studio; MediaMTX: download `linux_amd64` from the same release
 into `tools/mediamtx/`).
 
+## Manual
+
+The full operator manual is built into FestCast: **Manual** in the dashboard sidebar, or `/manual` (works
+offline, printable, includes a one-page camera operator sheet). Source: `backend/public/manual.html`.
+
 ## Event-day flow
 
 1. **Cameras → Create production** (3 slots by default). **Print QR sheet** or **Copy link** per camera.

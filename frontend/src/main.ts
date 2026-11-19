@@ -26,6 +26,8 @@ let main: HTMLElement;
 function shell() {
   const nav = h('nav.side', null,
     PAGES.map(([id, label], i) => h('a', { href: `#/${id}`, 'data-id': id }, label, h('span.k', null, `${i + 1}`))),
+    h('div.sep'),
+    h('a', { href: '/manual', target: '_blank', rel: 'noopener' }, 'Manual', h('span.k', null, '↗')),
     h('div.foot', null, live(h('div'), ['server', 'link'], () => {
       const s = store.get('server') || {};
       return [h('div', null, store.get('link') === 'up' ? 'Dashboard connected' : 'Dashboard reconnecting…'),

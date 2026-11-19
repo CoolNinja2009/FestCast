@@ -185,3 +185,8 @@ def test_tv_output_stop_restores_default_stream_service(env):
     assert env.mock.service["streamServiceType"] == "rtmp_common"
     assert env.mock.service["streamServiceSettings"] == {"key": ""}
     assert not any(n["level"] == "error" for n in env.ctx.bus.notifications)
+
+
+def test_manual_is_served(env):
+    r = env.client.get("/manual")
+    assert r.status_code == 200 and "FestCast manual" in r.text and "Camera operator sheet" in r.text
