@@ -200,6 +200,14 @@ class CameraService:
                 c.resolution_target = fields["resolution_target"]
             if "bitrate_kbps" in fields:
                 c.bitrate_kbps = max(500, min(int(fields["bitrate_kbps"]), 40000))
+            if "rotation" in fields:
+                if int(fields["rotation"]) % 360 not in (0, 90, 180, 270):
+                    raise ValueError("rotation must be 0, 90, 180 or 270")
+                c.rotation = int(fields["rotation"]) % 360
+            if "frame" in fields:
+                if fields["frame"] not in ("fit", "fill"):
+                    raise ValueError("frame must be fit or fill")
+                c.frame = fields["frame"]
         if old.name != c.name and self.ctx.obs.connected:
             await self.ctx.obs.rename_scene(cam_scene_name(old.name), cam_scene_name(c.name))
         if "resolution_target" in fields and old.resolution_target != c.resolution_target:
@@ -336,7 +344,8 @@ class CameraService:
         if status != prev_status:
             st["status"] = status
             self._history(c, status)
-        return {"ok": True, "reload": self.reload_nonce.get(cid, 0)}
+        return {"ok": True, "reload": self.reload_nonce.get(cid, 0), "rotation": c.rotation or 0,
+                "frame": c.frame or "fit"}
 
     def _status(self, c: Camera, st: dict, t: float) -> str:
         if not c.enabled:
@@ -382,6 +391,9 @@ class CameraService:
             "id": c.id, "slot": c.slot, "name": c.name, "input_type": c.input_type, "transport": c.transport,
             "enabled": c.enabled, "resolution_target": c.resolution_target, "bitrate_kbps": c.bitrate_kbps,
             "audio_active": c.audio_active, "obs_input": cam_input_name(c.id), "obs_scene": cam_scene_name(c.name),
+            "rotation": c.rotation or 0, "frame": c.frame or "fit",
+            "portrait": bool(st.get("status") == "live" and st.get("width") and st.get("height")
+                             and st["height"] > st["width"] and (c.rotation or 0) in (0, 180)),
             "status": st.get("status", "no_probe"), "last_seen": st.get("last_seen"),
             "width": st.get("width"), "height": st.get("height"), "fps": st.get("fps"),
             "bitrate_in_kbps": st.get("bitrate_kbps"), "jitter_ms": st.get("jitter_ms"),

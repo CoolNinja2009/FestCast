@@ -71,6 +71,9 @@ class Camera(Base):
     resolution_target: Mapped[str] = mapped_column(String(16), default="1080p")
     bitrate_kbps: Mapped[int] = mapped_column(Integer, default=6000)
     audio_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    # picture correction applied in the OBS-side page: rotation (0/90/180/270) and fit|fill into the 16:9 frame
+    rotation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    frame: Mapped[str] = mapped_column(String(8), default="fit", server_default="fit")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     production: Mapped[Production] = relationship(back_populates="cameras")
 

@@ -48,6 +48,9 @@ receiver/tv.html          TV WHEP player
   VDO.Ninja viewer and asks it for stats through the documented IFRAME API (`postMessage({getStats:true})` →
   `{stats:{inbound:{…}}}`, verified live). So camera health is real and measured even with no dashboard open, and the
   stream id can rotate (revocation) without touching the OBS source.
+* **Rotation / fit in the probe page.** Phones with orientation lock send sideways 1080×1920 frames; rotating the
+  16:9 browser source in OBS would rotate baked-in black bars too. The probe page sizes the VDO.Ninja iframe to the
+  video's real aspect (from getStats) and rotates/fits/fills it with CSS, per camera (`rotation`, `frame`).
 * **Previews via OBS screenshots** (`GetSourceScreenshot`, ~0.7 fps) instead of extra WebRTC viewers, so each phone
   uploads exactly one stream.
 * **Unknown ≠ zero.** Metrics are `None` when not measured. VDO.Ninja does not always report packet loss; the UI shows

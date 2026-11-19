@@ -188,3 +188,29 @@ def test_stats_wrong_key_or_remote_forbidden(env):
 
 def test_unknown_camera_report(env):
     assert env.report("nope", LIVE_1080).json() == {"ok": False}
+
+
+def test_rotation_and_frame_reach_the_obs_page(env):
+    env.client.post("/api/production", json={"name": "P", "cameras": 1}).raise_for_status()
+    cid = env.client.get("/api/state").json()["cameras"]["cameras"][0]["id"]
+    assert env.client.patch(f"/api/cameras/{cid}", json={"rotation": 45}).status_code == 400
+    assert env.client.patch(f"/api/cameras/{cid}", json={"frame": "zoom"}).status_code == 400
+    r = env.client.patch(f"/api/cameras/{cid}", json={"rotation": 90, "frame": "fill"})
+    assert r.status_code == 200 and r.json()["rotation"] == 90 and r.json()["frame"] == "fill"
+    k = {"k": env.ctx.local_key}
+    cfg = env.client.get(f"/obs/cam/{cid}/config", params=k).json()
+    assert cfg["rotation"] == 90 and cfg["frame"] == "fill"
+    rep = env.client.post(f"/obs/cam/{cid}/stats", params=k, json={"stats": None}).json()
+    assert rep["rotation"] == 90 and rep["frame"] == "fill"
+
+
+def test_portrait_feed_is_flagged_until_rotated(env):
+    env.client.post("/api/production", json={"name": "P", "cameras": 1}).raise_for_status()
+    cid = env.client.get("/api/state").json()["cameras"]["cameras"][0]["id"]
+    k = {"k": env.ctx.local_key}
+    env.client.post(f"/obs/cam/{cid}/stats", params=k,
+                    json={"stats": {"Resolution": "1080 x 1920", "_FPS": 30, "video_bitrate_kbps": 5000}})
+    cam = env.client.get("/api/state").json()["cameras"]["cameras"][0]
+    assert cam["portrait"] is True and cam["below_target"] is False   # 1080x1920 is still full 1080p
+    env.client.patch(f"/api/cameras/{cid}", json={"rotation": 90})
+    assert env.client.get("/api/state").json()["cameras"]["cameras"][0]["portrait"] is False

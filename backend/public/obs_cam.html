@@ -1,17 +1,38 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>FestCast camera probe</title>
-<style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+<style>
+html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
+iframe{position:absolute;border:0;transform-origin:50% 50%}
+</style>
 </head><body>
 <script>
-// Runs inside the OBS browser source. Embeds the VDO.Ninja viewer and reports its real WebRTC stats
-// (VDO.Ninja IFRAME API: postMessage({getStats:true}) -> {stats:{inbound:{...}}}) back to FestCast,
-// so camera health is known even when no dashboard is open. Shows nothing of its own in the programme.
+// Runs inside the OBS browser source. Embeds the VDO.Ninja viewer, reports its real WebRTC stats
+// (VDO.Ninja IFRAME API: postMessage({getStats:true}) -> {stats:{inbound:{...}}}) back to FestCast, and corrects
+// the picture: the iframe is sized to the video's real aspect ratio (from those stats) and rotated/fitted here,
+// so a sideways or portrait phone feed fills the 16:9 frame without baked-in black bars.
 const cid = location.pathname.split('/')[3];
 const k = new URLSearchParams(location.search).get('k');
 const q = `?k=${encodeURIComponent(k)}`;
 let frame = null, viewUrl = null, reload = null, enabled = true;
+let rotation = 0, fitMode = 'fit', vw = 16, vh = 9;
 let stats = null, statsAt = 0, lastEvent = null;
 
+function layout() {
+  if (!frame) return;
+  const W = window.innerWidth, H = window.innerHeight;
+  const sideways = rotation === 90 || rotation === 270;
+  const a = sideways ? vh / vw : vw / vh;           // aspect of the picture as it will appear
+  const cover = fitMode === 'fill';
+  let dw, dh;                                        // displayed (post-rotation) size
+  if ((W / H > a) !== cover) { dh = H; dw = H * a; } else { dw = W; dh = W / a; }
+  const iw = sideways ? dh : dw, ih = sideways ? dw : dh;   // iframe box before rotation = video aspect
+  Object.assign(frame.style, {width: iw + 'px', height: ih + 'px', left: (W - iw) / 2 + 'px', top: (H - ih) / 2 + 'px',
+    transform: `rotate(${rotation}deg)`});
+}
+function setPicture(r, f) {
+  r = Number(r) || 0; f = f === 'fill' ? 'fill' : 'fit';
+  if (r !== rotation || f !== fitMode) { rotation = r; fitMode = f; layout(); }
+}
 function mount() {
   if (frame) frame.remove();
   frame = null; stats = null;
@@ -20,6 +41,7 @@ function mount() {
   frame.allow = 'autoplay;fullscreen';
   frame.src = viewUrl;
   document.body.appendChild(frame);
+  layout();
 }
 async function config() {
   try {
@@ -29,8 +51,10 @@ async function config() {
     if (j.view_url !== viewUrl || j.reload !== reload || j.enabled !== enabled) {
       viewUrl = j.view_url; reload = j.reload; enabled = j.enabled; mount();
     }
+    setPicture(j.rotation, j.frame);
   } catch (e) {}
 }
+window.addEventListener('resize', layout);
 window.addEventListener('message', (e) => {
   if (!frame || e.source !== frame.contentWindow || !e.data || typeof e.data !== 'object') return;
   if ('stats' in e.data) {
@@ -41,6 +65,9 @@ window.addEventListener('message', (e) => {
       inbound = vals.length ? vals[0] : null;
     } else if (s && !s.inbound && !s.outbound) inbound = s;
     stats = inbound; statsAt = Date.now();
+    const res = inbound && (inbound.Resolution || inbound.resolution);
+    const m = typeof res === 'string' && res.match(/(\d+)\s*[x×X]\s*(\d+)/);
+    if (m && (Number(m[1]) / Number(m[2])).toFixed(3) !== (vw / vh).toFixed(3)) { vw = Number(m[1]); vh = Number(m[2]); layout(); }
   }
   if (e.data.action) lastEvent = e.data.action;
 });
@@ -51,6 +78,7 @@ setInterval(async () => {
       body: JSON.stringify({stats: (Date.now() - statsAt < 5000) ? stats : null, event: lastEvent})});
     const j = await r.json();
     if (j.reload !== undefined && reload !== null && j.reload !== reload) config();
+    if (j.rotation !== undefined) setPicture(j.rotation, j.frame);
   } catch (e) {}
 }, 2000);
 setInterval(config, 5000);

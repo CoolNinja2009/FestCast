@@ -107,6 +107,7 @@ async def obs_cam_config(request: Request, cid: str, k: str | None = None):
     except KeyError:
         raise HTTPException(404)
     return JSONResponse({"enabled": cam.enabled, "view_url": c.cameras.adapter.view_url(c.cameras.cam_dict(cam)),
+                         "rotation": cam.rotation or 0, "frame": cam.frame or "fit",
                          "reload": c.cameras.reload_nonce.get(cid, 0)}, headers=NOSTORE)
 
 

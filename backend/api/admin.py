@@ -105,6 +105,8 @@ class CamPatch(BaseModel):
     enabled: bool | None = None
     resolution_target: str | None = None
     bitrate_kbps: int | None = None
+    rotation: int | None = None
+    frame: str | None = None
 
 
 @router.patch("/cameras/{cid}")

@@ -79,6 +79,7 @@ These steps need hardware or a network that the automated tests can't provide:
 | `OBS not reachable` | OBS isn't running, or its WebSocket server is off. |
 | Camera stays **Waiting for phone** | Phone didn't press Start, or is on another network. Re-open the link. |
 | Camera **Not monitored** | OBS hasn't loaded its browser source; check the source exists in OBS. |
+| Picture sideways / portrait with black bars | iPhone Portrait Orientation Lock is on. Press **⟳ Rotate** on the camera card (no OBS changes needed), or have the operator unlock rotation and re-open the link. For a deliberately upright shot use **Fill** to crop to 16:9. |
 | Live but below target | The phone picked the front camera or is in portrait. On the phone use VDO.Ninja's settings to pick the rear camera. |
 | Phone link says invalid | It was revoked/expired (48 h). Copy a fresh link from the camera card. |
 | TV: "Waiting for the programme" | Press **Start TV output**; check the MediaMTX log on Outputs. |
