@@ -16,6 +16,7 @@ const q = `?k=${encodeURIComponent(k)}`;
 let frame = null, viewUrl = null, reload = null, enabled = true;
 let rotation = 0, fitMode = 'fit', vw = 16, vh = 9;
 let stats = null, statsAt = 0, lastEvent = null;
+let lastVideoAt = 0, mountedAt = 0, selfHeals = 0;
 
 function layout() {
   if (!frame) return;
@@ -40,6 +41,7 @@ function mount() {
   frame = document.createElement('iframe');
   frame.allow = 'autoplay;fullscreen';
   frame.src = viewUrl;
+  mountedAt = Date.now();
   document.body.appendChild(frame);
   layout();
 }
@@ -65,6 +67,7 @@ window.addEventListener('message', (e) => {
       inbound = vals.length ? vals[0] : null;
     } else if (s && !s.inbound && !s.outbound) inbound = s;
     stats = inbound; statsAt = Date.now();
+    if (inbound && (inbound.Resolution || inbound.resolution || inbound.video_bitrate_kbps)) lastVideoAt = Date.now();
     const res = inbound && (inbound.Resolution || inbound.resolution);
     const m = typeof res === 'string' && res.match(/(\d+)\s*[x×X]\s*(\d+)/);
     if (m && (Number(m[1]) / Number(m[2])).toFixed(3) !== (vw / vh).toFixed(3)) { vw = Number(m[1]); vh = Number(m[2]); layout(); }
@@ -82,6 +85,16 @@ setInterval(async () => {
   } catch (e) {}
 }, 2000);
 setInterval(config, 5000);
+// Self-heal: a camera that had video but has shown none for 45 s gets a fresh viewer (at most once a minute).
+// Only touches a feed that is already gone, so a working picture is never interrupted.
+setInterval(() => {
+  const now = Date.now();
+  if (frame && enabled && lastVideoAt && now - lastVideoAt > 45000 && now - mountedAt > 60000) {
+    selfHeals++; lastEvent = 'self-heal'; mount();
+  }
+}, 5000);
+// Browser memory hygiene for long shows: remount the viewer every 6 h, but only while there is no video.
+setInterval(() => { if (frame && Date.now() - mountedAt > 6 * 3600e3 && Date.now() - lastVideoAt > 10000) mount(); }, 60000);
 config();
 </script>
 </body></html>

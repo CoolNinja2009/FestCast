@@ -15,10 +15,11 @@ function configPanel() {
       f('filename', h('input', { type: 'text', value: c.filename })),
       f('warn_free_gb', h('input', { type: 'number', value: String(c.warn_free_gb), min: '1' })),
       f('segment_minutes', h('input', { type: 'number', value: String(c.segment_minutes || 0), min: '0', title: 'Advanced output mode only; 0 = one file' })),
+      f('show_hours', h('input', { type: 'number', value: String(c.show_hours ?? 9), min: '1', max: '48', step: '0.5', title: 'FestCast warns if the drive would fill before this' })),
     ];
     const checks = [['auto_start', 'Start recording automatically when the production starts'], ['record_during_standby', 'Keep recording during standby'], ['auto_remux', 'Remux MKV → MP4 after recording (lossless copy)']]
       .map(([k, l]) => h('label.c', null, f(k, h('input', { type: 'checkbox', checked: !!c[k] })), l));
-    const labels = ['Format', 'Encoder', 'Quality', 'Filename (OBS format codes)', 'Low-disk warning (GB)', 'Split every N minutes'];
+    const labels = ['Format', 'Encoder', 'Quality', 'Filename (OBS format codes)', 'Low-disk warning (GB)', 'Split every N minutes', 'Show length (hours)'];
     const save = async () => {
       const body: any = { root: root.value };
       box.querySelectorAll<HTMLInputElement>('[data-k]').forEach(i => { body[i.dataset.k!] = i.type === 'checkbox' ? i.checked : i.type === 'number' ? Number(i.value) : i.value; });

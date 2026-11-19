@@ -120,3 +120,17 @@ def test_no_profile_reload_while_recording(env):
     applied = env.run(env.ctx.recording.apply_to_obs)
     assert applied["outputs_reloaded"] is False and mock.reloads == before
     env.client.post("/api/recording/stop")
+
+
+def test_capacity_warning_when_drive_would_fill_before_show_ends(env):
+    rec = env.ctx.recording
+    rec.status.update(active=True, paused=False, duration_ms=120_000, bytes=600_000_000, dest_free_bytes=50 * 1024 ** 3)
+    # 600 MB per 2 min = 40 Mb/s -> 50 GB lasts ~3 h, a 9 h show needs ~8.97 h more
+    rec._check_capacity({})
+    msgs = [n["message"] for n in env.ctx.bus.notifications]
+    assert any("Recording drive fills in about" in m for m in msgs)
+    env.ctx.bus.notifications.clear()
+    rec.status.update(dest_free_bytes=400 * 1024 ** 3)   # plenty of space -> no warning
+    rec._warned.clear()
+    rec._check_capacity({})
+    assert not any("fills" in n["message"] for n in env.ctx.bus.notifications)

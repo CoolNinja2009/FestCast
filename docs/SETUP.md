@@ -12,6 +12,40 @@
 | MediaMTX | for wireless TV output: `scripts\get-mediamtx.ps1` (checksum-verified official release) |
 | Internet | VDO.Ninja needs it for signalling (camera media itself flows on the LAN when possible) |
 
+## Running for 9+ hours: what FestCast handles and what you must do
+
+**Handled by FestCast automatically**
+- Windows sleep / screen-off is blocked while FestCast runs.
+- `start.bat` restarts FestCast within 3 s if it ever crashes; OBS keeps recording through it and FestCast
+  re-attaches (recording state, cameras, layouts, TV output) on restart.
+- Background loops (metrics, standby rules, previews, OBS connection) are supervised and restarted if one dies.
+- TV output: if MediaMTX dies, or OBS's stream to it drops or stops delivering pictures for 15 s, it is restarted
+  (backoff 5 s → 60 s). It also resumes after FestCast or OBS restarts.
+- Cameras: a camera that had a picture but shows none for 45 s gets a fresh viewer automatically (only cameras
+  that are already down are touched).
+- Recording: OBS records (MKV survives crashes and power loss up to the last seconds). FestCast warns if, at the
+  bitrate OBS is really writing, the drive fills before the planned show length (Recordings → Show length).
+
+**Your checklist on the day (things FestCast cannot control)**
+1. **Windows Update**: Settings → Windows Update → *Pause updates* (1 week). An update restart ends the show.
+2. **Notifications**: turn on *Do not disturb*; close Discord, Steam, game launchers and other heavy apps.
+3. **Power**: plug the PC in; Settings → Power → *Best performance*.
+4. **Recording drive**: pick one with room for 9 h. Check the *recording bitrate* on the Recordings page after
+   1 minute: GB needed ≈ Mb/s × 4 (for 9 h). E.g. 40 Mb/s → ~160 GB. Use your big drive, or set OBS to
+   1920×1080 @ 30 fps and "Small" quality to roughly halve it.
+5. **OBS**: Settings → Advanced → *Automatically reconnect* on. Don't open OBS's settings dialog while live.
+6. **Network**: PC on **Ethernet** to the router if at all possible; phones close to the router; a dedicated
+   router for the production if the school Wi-Fi is busy.
+7. **Phones**: on chargers/power banks, auto-lock off, Low Power Mode off, out of direct sun/stage lights.
+8. Run `scripts\soak_test.py --minutes 540` the night before on the real setup (see below).
+
+## Soak test
+
+With FestCast running from `start.bat`: `.venv\Scripts\python scripts\soak_test.py --minutes 540` runs a full 9-hour
+rehearsal: recording, TV output, programme switching, dashboard churn, with ground truth read straight from OBS
+and MediaMTX. Add `--kill-mtx-at 60 --kill-festcast-at 120` to inject crashes and prove recovery. It prints memory
+trends extrapolated to 9 hours and writes a CSV to `data\soak\`, then cleans up after itself.
+
 ## OBS settings that matter
 
 * **Video**: base and output 1920×1080, 30 fps.

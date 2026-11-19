@@ -25,7 +25,7 @@ DEFAULTS = {
     "root": str(Path.home() / "Videos" / "FestCast_Recordings"),
     "format": "mkv", "encoder": "nvenc_h264", "quality": "high", "filename": "Event_%hh%mm%ss",
     "auto_start": True, "record_during_standby": True, "warn_free_gb": 30, "auto_remux": False,
-    "segment_minutes": 0,
+    "segment_minutes": 0, "show_hours": 9,
 }
 FORMATS = {"mkv", "mp4", "mov", "fragmented_mp4", "hybrid_mp4"}
 # encoder ids per OBS output mode (OBS 31+ native NVENC ids; older builds used jim_nvenc). We verify read-back.
@@ -409,6 +409,7 @@ class RecordingService:
             if r:
                 self.status.update(active=r.get("outputActive", False), paused=r.get("outputPaused", False),
                                    duration_ms=r.get("outputDuration"), bytes=r.get("outputBytes"))
+                self._check_capacity(dest)
                 if self.status["active"] and not self.status["paused"]:
                     b, t = r.get("outputBytes") or 0, time.time()
                     if self._last_bytes and b <= self._last_bytes[1] and t - self._last_bytes[0] > 20:
@@ -418,6 +419,21 @@ class RecordingService:
                 else:
                     self._last_bytes = None
         self.publish()
+
+    def _check_capacity(self, dest: dict) -> None:
+        """Warn early (and every 10 min) if, at the bitrate OBS is really writing, the drive fills before the
+        planned show length ends."""
+        est = self.estimate_remaining_s()
+        ms = self.status.get("duration_ms") or 0
+        if est is None or not self.status.get("active") or ms < 60_000:
+            return
+        show_s = float(self.config.get("show_hours") or 9) * 3600
+        needed = max(0.0, show_s - ms / 1000)
+        rate = (self.status.get("bytes") or 0) / (ms / 1000) * 8 / 1e6
+        if est < needed:
+            self._warn("capacity", "error" if est < 3600 else "warning",
+                       f"Recording drive fills in about {est / 3600:.1f} h at {rate:.0f} Mb/s, but the show needs "
+                       f"{needed / 3600:.1f} h more. Choose a drive with more space or lower the quality.", every=600)
 
     def _warn(self, key: str, level: str, msg: str, every: float = 60) -> None:
         if time.time() - self._warned.get(key, 0) > every:

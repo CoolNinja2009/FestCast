@@ -23,7 +23,7 @@ Live production system for a school festival. Read `docs/ARCHITECTURE.md` first 
 
 ## Status (2026-11-19)
 
-Verified: 96 backend tests; dashboard click-through in simulation and on real OBS 33.0.1 (WS 5.7.6);
+Verified: 97 backend tests; dashboard click-through in simulation and on real OBS 33.0.1 (WS 5.7.6);
 `scripts/obs_smoke_test.py` all-pass on the real PC (sources, probe pages inside OBS, layout transforms,
 NVENC H.264 1920x1080 MKV verified by ffprobe); probe page against live vdo.ninja; phone page hand-off.
 TV output verified end to end on the real PC: OBS 33 WHIP -> MediaMTX 1.21.4 -> WHEP TV page (1920x1080, 0 loss);
@@ -32,3 +32,9 @@ Not yet verified: real phone feed (see docs/SETUP.md checklist).
 Ports are automatic (`backend/core/ports.py`, remembered in `data/ports.json`); a port someone owns on 127.0.0.1 counts as
 busy (this PC has a service on 127.0.0.1:8000). OBS canvas here is 2560x1440@60 -> 1080p output.
 Cameras: unlimited slots (+ Add camera); templates up to 6 plus an auto-grid for any count.
+
+Long-run (2026-11-19, real OBS): `scripts/soak_test.py` 30 min with MediaMTX killed at 8 min and FestCast hard-killed
+at 16 min -> 0 OBS recording gaps; 8 min run with FestCast killed -> TV outage 0 s (restarted FestCast re-attaches to
+the running MediaMTX). Self-healing: start.bat supervisor, supervised loops, TV output watchdog (+ resume via
+`tv_output_on`), camera viewer remount after 45 s without video, Windows keep-awake, show-length disk warning.
+A full 9 h soak (`--minutes 540`) has not been run yet.

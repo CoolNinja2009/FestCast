@@ -57,7 +57,9 @@ async def health(request: Request):
             "database": "ok" if c.db.get("local_key") else "error",
             "recording_destination": "ok" if c.recording.status.get("dest_ok") else "check",
             "mediamtx": c.outputs.mtx_state, "metrics_age_s": round(time.time() - m["ts"], 1) if m else None,
-            "cameras_live": c.cameras.usable_count()}
+            "cameras_live": c.cameras.usable_count(),
+            "uptime_s": round(time.time() - getattr(c, "started_at", time.time())),
+            "loops_restarted": dict(getattr(c, "restarts", {})), "tv_output_auto_restarts": c.outputs.heals}
 
 
 # -- production / cameras ------------------------------------------------------------------------------------
@@ -420,7 +422,8 @@ async def recording_config(request: Request, body: dict):
 async def recording_destination(request: Request):
     c = ctx(request)
     import asyncio
-    return {"check": await asyncio.to_thread(c.recording.check_destination), "drives": c.recording.drives()}
+    return {"check": await asyncio.to_thread(c.recording.check_destination),
+            "drives": await asyncio.to_thread(c.recording.drives)}
 
 
 @router.post("/recording/apply")

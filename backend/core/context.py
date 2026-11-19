@@ -31,6 +31,21 @@ from .events import EventBus, setup_logging
 log = logging.getLogger("festcast")
 
 
+def keep_awake(on: bool) -> None:
+    """Stop Windows sleeping or blanking the screen while FestCast runs (a sleeping PC ends the show).
+    SetThreadExecutionState is per thread; FestCast's event loop thread lives for the whole run."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED, ES_DISPLAY_REQUIRED = 0x80000000, 0x00000001, 0x00000002
+        flags = ES_CONTINUOUS | (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED if on else 0)
+        ctypes.windll.kernel32.SetThreadExecutionState(flags)
+        log.info("Windows sleep %s", "blocked while FestCast runs" if on else "allowed again")
+    except Exception:  # noqa: BLE001
+        log.warning("could not change Windows sleep settings")
+
+
 class Ctx:
     def __init__(self, settings: Settings, db: Database | None = None, bus: EventBus | None = None,
                  transport_factory=None) -> None:
@@ -85,6 +100,7 @@ class Ctx:
         await self.cameras.sync_all()
         await self.layouts.sync_all()
         await self.recording.on_obs_connect()
+        await self.outputs.resume_if_wanted()
         self.production.publish()
         self.recording.publish()
 
@@ -114,16 +130,40 @@ class Ctx:
         setup_logging(self.bus, self.settings.data_dir / "logs")
         log.info("FestCast starting (%s) on %s", "SIMULATION" if self.settings.simulation else "live OBS",
                  self.public_base)
+        self.started_at = time.time()
+        keep_awake(True)
         self.obs.start()
-        for coro in (self.metrics.run(), self.production.run(), self.preview_loop()):
-            self._tasks.append(asyncio.create_task(coro))
+        self._loops = {"metrics": self.metrics.run, "standby": self.production.run, "previews": self.preview_loop}
+        self._loop_tasks = {name: asyncio.create_task(f(), name=name) for name, f in self._loops.items()}
+        self.restarts: dict[str, int] = {}
+        self._tasks.append(asyncio.create_task(self._supervise(), name="supervisor"))
+        if self.outputs.want_programme:
+            self.outputs.ensure_watchdog()
+
+    async def _supervise(self) -> None:
+        """A long show must never lose a background loop to an unexpected bug: restart any that ends."""
+        while True:
+            await asyncio.sleep(5)
+            for name, task in list(self._loop_tasks.items()):
+                if task.done() and not task.cancelled():
+                    err = task.exception()
+                    self.restarts[name] = self.restarts.get(name, 0) + 1
+                    log.error("background loop '%s' stopped (%r) - restarting", name, err)
+                    self._loop_tasks[name] = asyncio.create_task(self._loops[name](), name=name)
+            if self.obs._task is not None and self.obs._task.done() and not self.obs._task.cancelled():
+                log.error("OBS connection loop stopped (%r) - restarting", self.obs._task.exception())
+                self.restarts["obs"] = self.restarts.get("obs", 0) + 1
+                self.obs.start()
+            if self.outputs.want_programme or self.outputs.want_mtx:
+                self.outputs.ensure_watchdog()
 
     async def stop(self) -> None:
-        for t in self._tasks:
+        for t in [*self._tasks, *getattr(self, "_loop_tasks", {}).values()]:
             t.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*self._tasks, *getattr(self, "_loop_tasks", {}).values(), return_exceptions=True)
         await self.outputs.shutdown()
         await self.obs.stop()
+        keep_awake(False)
 
     # -- diagnostics & backup ------------------------------------------------------------------------------
     def diagnostics_zip(self) -> bytes:
