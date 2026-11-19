@@ -74,8 +74,23 @@ def create_app(settings: Settings | None = None, ctx: Ctx | None = None) -> Fast
 
 
 def main() -> None:
+    import argparse
+    import os
+
     import uvicorn
 
+    ap = argparse.ArgumentParser(description="FestCast")
+    ap.add_argument("--simulation", action="store_true", help="use the in-memory OBS simulator")
+    ap.add_argument("--port", type=int)
+    ap.add_argument("--data-dir")
+    a = ap.parse_args()
+    if a.simulation:
+        os.environ["FESTCAST_SIMULATION"] = "true"
+    if a.port:
+        os.environ["FESTCAST_PORT"] = str(a.port)
+    if a.data_dir:
+        os.environ["FESTCAST_DATA_DIR"] = a.data_dir
+    get_settings.cache_clear()
     s = get_settings()
     uvicorn.run(create_app(s), host=s.host, port=s.port, log_level="warning", ws_ping_interval=20)
 

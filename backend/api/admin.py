@@ -267,9 +267,9 @@ async def create_layout(request: Request, body: LayoutIn):
 
 
 @router.put("/layouts/{lid}")
-async def update_layout(request: Request, lid: str, body: LayoutIn):
+async def update_layout(request: Request, lid: str, body: LayoutIn, sync: bool = True):
     c = ctx(request)
-    return c.layouts.view(await c.layouts.update(lid, body.name, body.elements))
+    return c.layouts.view(await c.layouts.update(lid, body.name, body.elements, sync=sync))
 
 
 @router.post("/layouts/{lid}/duplicate")

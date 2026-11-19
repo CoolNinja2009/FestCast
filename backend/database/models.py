@@ -4,8 +4,30 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime as _DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
+
+
+class DateTime(TypeDecorator):
+    """Timezone-aware UTC datetimes. SQLite drops tzinfo on storage; re-attach UTC when loading so the API
+    always emits '+00:00' timestamps (otherwise browsers read them as local time)."""
+    impl = _DateTime
+    cache_ok = True
+
+    def __init__(self, timezone: bool = True) -> None:  # noqa: ARG002 - signature kept for the column definitions
+        super().__init__(timezone=True)
+
+    def process_bind_param(self, value, dialect):  # noqa: ANN001
+        if value is not None and value.tzinfo is not None:
+            value = value.astimezone(timezone.utc)
+        return value
+
+    def process_result_value(self, value, dialect):  # noqa: ANN001
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
 
 
 def now() -> datetime:

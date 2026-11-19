@@ -379,8 +379,12 @@ class RecordingService:
                     self._finish(r.id, "interrupted")
             log.info("OBS is recording (recovered after reconnect)")
         else:
+            self._current = None
+            self._expect_stop = False
+            self.status.update(active=False, paused=False, confirmed=False)
             for r in open_rows:
                 await self._finalize(r.id, r.path, "interrupted")
+            self.publish()
 
     # -- views ------------------------------------------------------------------------------------------------------
     def history(self, limit: int = 100) -> list[dict]:

@@ -143,8 +143,9 @@ class MetricsService:
         sysm["gpu"] = await self.gpu()
         m = {"ts": time.time(), "system": sysm, "obs": await self.obs(), "cameras": self.cameras(),
              "outputs": self.outputs(), "recording": self.recording(),
-             "network": {"lan_ip": self.ctx.lan_ip, "health": self.health_net()}}
+             "network": {"lan_ip": self.ctx.lan_ip, "health": None}}
         self.latest = m
+        m["network"]["health"] = self.health_net()
         self.history.append({"ts": m["ts"], "cpu": sysm["cpu_pct"], "ram": sysm["ram_pct"],
                              "gpu": (sysm["gpu"] or {}).get("util_pct"), "enc": (sysm["gpu"] or {}).get("encoder_pct"),
                              "rx": sysm["net_rx_kbps"], "tx": sysm["net_tx_kbps"], "cam_in": m["cameras"]["in_kbps"],

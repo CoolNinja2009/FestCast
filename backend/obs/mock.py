@@ -167,6 +167,7 @@ class MockObsTransport:
             raise ObsError("TriggerStudioModeTransition", 506, "studio mode not active")
         self.program, self.preview = self.preview, self.program
         await self._emit("CurrentProgramSceneChanged", {"sceneName": self.program})
+        await self._emit("CurrentPreviewSceneChanged", {"sceneName": self.preview})
 
     def r_GetSceneTransitionList(self, d):
         return {"currentSceneTransitionName": self.transition, "currentSceneTransitionDuration": self.duration,
