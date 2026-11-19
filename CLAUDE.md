@@ -23,10 +23,12 @@ Live production system for a school festival. Read `docs/ARCHITECTURE.md` first 
 
 ## Status (2026-11-19)
 
-Verified: 93 backend tests; dashboard click-through in simulation and on real OBS 33.0.1 (WS 5.7.6);
+Verified: 96 backend tests; dashboard click-through in simulation and on real OBS 33.0.1 (WS 5.7.6);
 `scripts/obs_smoke_test.py` all-pass on the real PC (sources, probe pages inside OBS, layout transforms,
 NVENC H.264 1920x1080 MKV verified by ffprobe); probe page against live vdo.ninja; phone page hand-off.
-Not yet verified: real phone feed, MediaMTX TV playback (see docs/SETUP.md checklist).
+TV output verified end to end on the real PC: OBS 33 WHIP -> MediaMTX 1.21.4 -> WHEP TV page (1920x1080, 0 loss);
+stop restores OBS's stream service exactly (OBS rejects empty streamServiceSettings: restore uses {"key": ""}).
+Not yet verified: real phone feed (see docs/SETUP.md checklist).
 Ports are automatic (`backend/core/ports.py`, remembered in `data/ports.json`); a port someone owns on 127.0.0.1 counts as
 busy (this PC has a service on 127.0.0.1:8000). OBS canvas here is 2560x1440@60 -> 1080p output.
 Cameras: unlimited slots (+ Add camera); templates up to 6 plus an auto-grid for any count.

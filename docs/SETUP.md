@@ -83,6 +83,7 @@ These steps need hardware or a network that the automated tests can't provide:
 | Live but below target | The phone picked the front camera or is in portrait. On the phone use VDO.Ninja's settings to pick the rear camera. |
 | Phone link says invalid | It was revoked/expired (48 h). Copy a fresh link from the camera card. |
 | TV: "Waiting for the programme" | Press **Start TV output**; check the MediaMTX log on Outputs. |
+| Echo / hum / strange sound from the PC speakers | Don't play the TV page (or OBS monitoring) on the production PC's own speakers while OBS captures **Desktop Audio**: the sound loops back into the programme. Test TV pages on the TV, or mute Desktop Audio in FestCast's Audio panel. |
 | TV: picture but no sound | Tap the screen once (browsers block autoplay audio). |
 | TV never connects | Firewall UDP 8189 / TCP 8889; check OBS stream encoder is H.264. |
 | PPTX import fails | Install LibreOffice, or save the deck as PDF and import that. |

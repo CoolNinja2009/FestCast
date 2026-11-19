@@ -306,9 +306,16 @@ paths:
                 if not obs.state.get("streaming"):
                     break
                 await asyncio.sleep(0.25)
-            await obs.try_call("SetStreamServiceSettings", {"streamServiceType": saved["streamServiceType"],
-                                                            "streamServiceSettings": saved.get(
-                                                                "streamServiceSettings") or {}})
+            # OBS rejects an empty settings object (its untouched default is rtmp_common with no settings);
+            # {"key": ""} is the same "nothing configured" state in a form OBS accepts.
+            settings = saved.get("streamServiceSettings") or {"key": ""}
+            try:
+                await obs.call("SetStreamServiceSettings", {"streamServiceType": saved["streamServiceType"],
+                                                            "streamServiceSettings": settings})
+                log.info("OBS stream service restored to %s", saved["streamServiceType"])
+            except ObsError as e:
+                self.ctx.bus.notify("error", f"Could not restore OBS's previous stream settings ({e.comment}). "
+                                    "Check OBS > Settings > Stream before streaming elsewhere.", "outputs")
         self.publish()
 
     # -- HDMI --------------------------------------------------------------------------------------------------

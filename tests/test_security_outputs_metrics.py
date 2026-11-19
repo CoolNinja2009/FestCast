@@ -172,3 +172,16 @@ def test_network_health_uses_current_sample(env):
     env.report(env.cam_ids()[0], LIVE_1080)
     m = env.run(env.ctx.metrics.sample)
     assert m["network"]["health"] == "degraded"      # 1 of 2 cameras live
+
+
+def test_tv_output_stop_restores_default_stream_service(env):
+    """Real OBS 33 rejects SetStreamServiceSettings with empty settings; its untouched default is
+    rtmp_common/{}. Stopping the TV output must still put that back (found on the real PC)."""
+    out = env.ctx.outputs
+    out._saved_service = {"streamServiceType": "rtmp_common", "streamServiceSettings": {}}
+    env.mock.service = {"streamServiceType": "whip_custom",
+                        "streamServiceSettings": {"server": "http://127.0.0.1:8889/festcast/whip", "bearer_token": ""}}
+    env.run(out.stop_programme)
+    assert env.mock.service["streamServiceType"] == "rtmp_common"
+    assert env.mock.service["streamServiceSettings"] == {"key": ""}
+    assert not any(n["level"] == "error" for n in env.ctx.bus.notifications)

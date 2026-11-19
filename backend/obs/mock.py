@@ -318,7 +318,10 @@ class MockObsTransport:
 
     # stream
     def r_GetStreamServiceSettings(self, d): return dict(self.service)
-    def r_SetStreamServiceSettings(self, d): self.service = {"streamServiceType": d["streamServiceType"],
+    def r_SetStreamServiceSettings(self, d):
+        if not d.get("streamServiceSettings"):  # real OBS 33: 403 "must not be empty"
+            raise ObsError("SetStreamServiceSettings", 403, "The field value of `streamServiceSettings` must not be empty.")
+        self.service = {"streamServiceType": d["streamServiceType"],
                                                             "streamServiceSettings": d["streamServiceSettings"]}
     def r_GetStreamStatus(self, d): return {"outputActive": self.stream["active"], "outputReconnecting": False,
                                             "outputBytes": 0, "outputDuration": 0, "outputCongestion": 0.0,
