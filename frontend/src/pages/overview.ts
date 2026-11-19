@@ -1,5 +1,5 @@
-import { act, api, bytes, clock, dash, disposers, dur, h, kbps, live, n, previewImg, spark, store } from '../lib';
-import { createProductionDialog } from './cameras';
+import { act, api, bytes, clock, copy, dash, disposers, dur, h, kbps, live, n, pill, previewImg, spark, store } from '../lib';
+import { createProductionDialog, showQr } from './cameras';
 
 function stat(label: string, value: any, sub?: any, cls = '') {
   return h('div.panel.stat', { class: cls }, h('span.l', null, label), h('span.v', null, value), h('span.s', null, sub ?? ''));
@@ -15,6 +15,7 @@ export function overviewPage(el: HTMLElement) {
     h('div.page-h', null, h('h1', null, 'Overview'), h('span.sub', null, 'Live state of every subsystem')),
     live(h('div'), ['cameras', 'obs', 'production', 'server'], banners),
     live(h('div.grid.g4'), ['metrics', 'cameras', 'obs', 'recording', 'outputs', 'production'], tiles),
+    live(h('div'), ['cameras'], cameraLinks),
     h('div.grid.g2', { style: { marginTop: '14px' } },
       h('div.panel', null, h('div.ph', null, h('h2', null, 'Programme')),
         h('div.pb', null, h('div.mon.pgm', null, h('span.lab', null, 'PGM'), previewImg('program_scene', 'Programme preview appears when OBS is connected')),
@@ -87,4 +88,20 @@ function quickActions() {
       : h('button.btn.green', { onclick: () => act(() => api('POST', '/api/production/start'), 'Production started') }, 'Start production'),
     h('a.btn', { href: '#/cameras' }, 'Cameras'), h('a.btn', { href: '#/production' }, 'Switcher & layouts'), h('a.btn', { href: '#/recordings' }, 'Recording'),
   ];
+}
+
+function cameraLinks() {
+  const s = store.get('cameras') || {};
+  const cams = s.cameras || [];
+  if (!s.production || !cams.length) return null;
+  return h('div.panel', { style: { marginTop: '14px' } },
+    h('div.ph', null, h('h2', null, 'Camera links'), h('span.small.dim', null, 'send one link to each camera operator'),
+      h('a.btn.sm.right', { href: '#/cameras' }, 'All camera controls')),
+    h('table.t', null, cams.map((c: any) => h('tr', null,
+      h('td', { style: { width: '150px' } }, h('b', null, c.name)),
+      h('td', { style: { width: '170px' } }, pill(c.status)),
+      h('td.mono.small', { style: { wordBreak: 'break-all' } }, c.invite ? c.invite.link : '—'),
+      h('td', { style: { textAlign: 'right', whiteSpace: 'nowrap' } },
+        c.invite ? [h('button.btn.sm', { onclick: () => copy(c.invite.link, `${c.name} link`) }, 'Copy'),
+          h('button.btn.sm', { onclick: () => showQr(c.id, c.name) }, 'QR')] : null)))));
 }

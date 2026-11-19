@@ -7,7 +7,11 @@ export function createProductionDialog() {
     h('p.dim', { style: { marginTop: 0 } }, 'Creates the camera room, one slot per camera with its own unguessable stream ID and invitation link, and the matching OBS sources and scenes.'),
     h('label.f', null, 'Event name', name), h('label.f', null, 'Camera slots', count)), [
     { label: 'Cancel' },
-    { label: 'Create', cls: 'primary', run: async () => !!(await act(() => api('POST', '/api/production', { name: name.value, cameras: Number(count.value) }), 'Production created')) },
+    { label: 'Create', cls: 'primary', run: async () => {
+      const ok = !!(await act(() => api('POST', '/api/production', { name: name.value, cameras: Number(count.value) }), 'Production created: camera links are ready'));
+      if (ok) location.hash = '#/cameras';   // the invitation links live here
+      return ok;
+    } },
   ]);
 }
 
