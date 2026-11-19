@@ -1,0 +1,59 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>FestCast camera probe</title>
+<style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+</head><body>
+<script>
+// Runs inside the OBS browser source. Embeds the VDO.Ninja viewer and reports its real WebRTC stats
+// (VDO.Ninja IFRAME API: postMessage({getStats:true}) -> {stats:{inbound:{...}}}) back to FestCast,
+// so camera health is known even when no dashboard is open. Shows nothing of its own in the programme.
+const cid = location.pathname.split('/')[3];
+const k = new URLSearchParams(location.search).get('k');
+const q = `?k=${encodeURIComponent(k)}`;
+let frame = null, viewUrl = null, reload = null, enabled = true;
+let stats = null, statsAt = 0, lastEvent = null;
+
+function mount() {
+  if (frame) frame.remove();
+  frame = null; stats = null;
+  if (!enabled || !viewUrl) return;
+  frame = document.createElement('iframe');
+  frame.allow = 'autoplay;fullscreen';
+  frame.src = viewUrl;
+  document.body.appendChild(frame);
+}
+async function config() {
+  try {
+    const r = await fetch(`/obs/cam/${cid}/config${q}`, {cache: 'no-store'});
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j.view_url !== viewUrl || j.reload !== reload || j.enabled !== enabled) {
+      viewUrl = j.view_url; reload = j.reload; enabled = j.enabled; mount();
+    }
+  } catch (e) {}
+}
+window.addEventListener('message', (e) => {
+  if (!frame || e.source !== frame.contentWindow || !e.data || typeof e.data !== 'object') return;
+  if ('stats' in e.data) {
+    const s = e.data.stats;
+    let inbound = null;
+    if (s && s.inbound && typeof s.inbound === 'object') {
+      const vals = Object.values(s.inbound).filter(Boolean);
+      inbound = vals.length ? vals[0] : null;
+    } else if (s && !s.inbound && !s.outbound) inbound = s;
+    stats = inbound; statsAt = Date.now();
+  }
+  if (e.data.action) lastEvent = e.data.action;
+});
+setInterval(() => { try { frame && frame.contentWindow.postMessage({getStats: true}, '*'); } catch (e) {} }, 2000);
+setInterval(async () => {
+  try {
+    const r = await fetch(`/obs/cam/${cid}/stats${q}`, {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({stats: (Date.now() - statsAt < 5000) ? stats : null, event: lastEvent})});
+    const j = await r.json();
+    if (j.reload !== undefined && reload !== null && j.reload !== reload) config();
+  } catch (e) {}
+}, 2000);
+setInterval(config, 5000);
+config();
+</script>
+</body></html>

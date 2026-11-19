@@ -1,0 +1,81 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>FestCast TV</title>
+<style>
+html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden;font-family:system-ui,"Segoe UI",sans-serif;color:#fff}
+video{width:100%;height:100%;object-fit:contain;background:#000}
+#ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#000c;text-align:center}
+#ov.hide{display:none}#ov h1{margin:0;font-size:4vw}#ov p{margin:0;color:#aab;font-size:2vw}
+#bar{position:fixed;right:16px;bottom:16px;display:flex;gap:8px;opacity:0;transition:opacity .3s}
+body:hover #bar{opacity:1}button{background:#222a;color:#fff;border:1px solid #fff4;border-radius:8px;padding:10px 14px;font-size:16px}
+#diag{position:fixed;left:12px;top:12px;font:12px ui-monospace,monospace;background:#000a;padding:8px;border-radius:6px;display:none;white-space:pre}
+</style></head><body>
+<video id="v" autoplay playsinline muted></video>
+<div id="ov"><h1 id="t">FestCast</h1><p id="s">Connecting…</p><button id="snd" style="display:none">Tap for sound ▶</button></div>
+<div id="bar"><button id="fs">Fullscreen</button><button id="mute">Sound</button><button id="dg">Diagnostics</button></div>
+<div id="diag"></div>
+<script>
+// WHEP receiver. The offer goes to FestCast, which checks this receiver's token and forwards it to MediaMTX.
+const token = location.pathname.split('/').pop();
+const base = '/api/public/tv/' + encodeURIComponent(token);
+const v = document.getElementById('v'), ov = document.getElementById('ov');
+let pc = null, session = null, state = 'connecting', retry = null, last = null, stats = {}, revoked = false;
+function status(t, s) { document.getElementById('t').textContent = t; document.getElementById('s').textContent = s || ''; ov.classList.remove('hide'); }
+function waitIce(pc) { return new Promise(res => { if (pc.iceGatheringState === 'complete') return res();
+  const t = setTimeout(res, 2500); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); }); }
+async function close() {
+  if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+  if (session) { fetch(base + '/whep?session=' + encodeURIComponent(session), {method: 'DELETE'}).catch(() => {}); session = null; }
+}
+function again(ms) { clearTimeout(retry); if (!revoked) retry = setTimeout(connect, ms); }
+async function connect() {
+  await close();
+  state = 'connecting';
+  try {
+    pc = new RTCPeerConnection({iceServers: []});
+    pc.addTransceiver('video', {direction: 'recvonly'});
+    pc.addTransceiver('audio', {direction: 'recvonly'});
+    pc.ontrack = e => { if (v.srcObject !== e.streams[0]) v.srcObject = e.streams[0]; };
+    pc.onconnectionstatechange = () => {
+      const s = pc && pc.connectionState;
+      if (s === 'connected') { state = 'playing'; ov.classList.add('hide'); if (v.muted) document.getElementById('snd').style.display = ''; }
+      if (s === 'failed' || s === 'disconnected' || s === 'closed') { state = 'reconnecting'; status('Reconnecting…', 'The programme feed was interrupted'); again(2000); }
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitIce(pc);
+    const r = await fetch(base + '/whep', {method: 'POST', headers: {'Content-Type': 'application/sdp'}, body: pc.localDescription.sdp});
+    if (r.status === 403) { revoked = true; state = 'revoked'; status('Receiver revoked', 'Ask the producer for a new TV link.'); return close(); }
+    if (r.status !== 201) { state = 'waiting'; status('Waiting for the programme', r.status === 404 ? 'The production is not on air yet' : (await r.text()).slice(0, 120)); return again(3000); }
+    session = r.headers.get('X-Session');
+    await pc.setRemoteDescription({type: 'answer', sdp: await r.text()});
+  } catch (e) { state = 'failed'; status('Connection problem', String(e).slice(0, 120)); again(3000); }
+}
+async function report() {
+  if (revoked) return;
+  if (pc) { try {
+    const rep = await pc.getStats(); let vid = null, pair = null;
+    rep.forEach(s => { if (s.type === 'inbound-rtp' && s.kind === 'video') vid = s; if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s; });
+    if (vid) {
+      const now = performance.now(), kbps = last ? (vid.bytesReceived - last.b) * 8 / (now - last.t) : null;
+      last = {b: vid.bytesReceived, t: now};
+      stats = {width: vid.frameWidth, height: vid.frameHeight, fps: vid.framesPerSecond, bitrate_kbps: kbps && Math.round(kbps),
+               jitter_ms: vid.jitter != null ? Math.round(vid.jitter * 1000) : null, packets_lost: vid.packetsLost,
+               rtt_ms: pair && pair.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) : null};
+    }
+  } catch (e) {} }
+  document.getElementById('diag').textContent = JSON.stringify({state, ...stats}, null, 1);
+  try {
+    const r = await fetch(base + '/stats', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({state, ...stats, user_agent: navigator.userAgent.slice(0, 120)})});
+    if (r.status === 403) { revoked = true; await close(); status('Receiver revoked', 'Ask the producer for a new TV link.'); }
+  } catch (e) {}
+}
+document.getElementById('snd').onclick = () => { v.muted = false; v.play(); document.getElementById('snd').style.display = 'none'; if (state === 'playing') ov.classList.add('hide'); };
+document.getElementById('mute').onclick = () => { v.muted = !v.muted; v.play(); };
+document.getElementById('fs').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
+document.getElementById('dg').onclick = () => { const d = document.getElementById('diag'); d.style.display = d.style.display === 'block' ? 'none' : 'block'; };
+document.addEventListener('dblclick', () => document.getElementById('fs').click());
+fetch(base).then(r => r.ok ? r.json() : Promise.reject(r.status)).then(j => { document.title = 'FestCast · ' + j.name; connect(); })
+  .catch(() => { revoked = true; status('Receiver link not valid', 'Ask the producer for a new TV link.'); });
+setInterval(report, 3000);
+</script></body></html>

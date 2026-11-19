@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>FestCast standby</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:"Segoe UI",system-ui,sans-serif}
+.slide{position:absolute;inset:0;background-size:contain;background-position:center;background-repeat:no-repeat;opacity:0}
+.slide.on{opacity:1}.fade{transition:opacity .9s ease}.slidein{transition:transform .8s ease,opacity .8s ease;transform:translateX(6%)}
+.slidein.on{transform:none}
+#card{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;color:#fff;
+  background:radial-gradient(ellipse at 50% 40%,#1b1f27 0%,#07080a 70%)}
+#card .ev{font-size:4.2vw;font-weight:700;letter-spacing:.02em}#card .msg{font-size:2.4vw;color:#c9ccd1;margin-top:1.2vw}
+#card .clock{position:absolute;bottom:4vw;font-size:1.6vw;color:#8a9099;font-variant-numeric:tabular-nums}
+#brand{position:absolute;left:3vw;bottom:2.6vw;color:#fff;font-size:1.5vw;font-weight:600;text-shadow:0 2px 8px #000a}
+</style></head><body>
+<div id="stage"></div><div id="card"><div class="ev" id="ev"></div><div class="msg" id="msg"></div><div class="clock" id="clock"></div></div>
+<div id="brand"></div>
+<script>
+const k = new URLSearchParams(location.search).get('k');
+let state = null, idx = -1, timer = null, nonce = null;
+const stage = document.getElementById('stage');
+function show() {
+  clearTimeout(timer);
+  const slides = (state && state.slides) || [];
+  document.body.style.background = (state && state.background) || '#000';
+  document.getElementById('brand').textContent = (state && state.branding) || '';
+  if (!slides.length) {
+    stage.innerHTML = ''; document.getElementById('card').style.display = 'flex';
+    document.getElementById('ev').textContent = state ? state.event : 'FestCast';
+    document.getElementById('msg').textContent = state ? state.message : '';
+    return;
+  }
+  document.getElementById('card').style.display = 'none';
+  idx = (idx + 1) % slides.length;
+  const s = slides[idx];
+  const d = document.createElement('div');
+  d.className = 'slide ' + (state.transition === 'fade' ? 'fade' : state.transition === 'slide' ? 'slidein' : '');
+  d.style.backgroundImage = `url("${s.url}")`;
+  stage.appendChild(d);
+  const img = new Image(); img.onload = img.onerror = () => requestAnimationFrame(() => requestAnimationFrame(() => d.classList.add('on')));
+  img.src = s.url;
+  setTimeout(() => { while (stage.children.length > 1) stage.removeChild(stage.firstChild); }, 1200);
+  timer = setTimeout(show, Math.max(1, s.duration) * 1000);
+}
+async function poll() {
+  try {
+    const r = await fetch('/obs/standby/state?k=' + encodeURIComponent(k), {cache: 'no-store'});
+    if (r.ok) { const j = await r.json(); if (j.nonce !== nonce) { state = j; nonce = j.nonce; idx = -1; show(); } }
+  } catch (e) {}
+}
+setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); }, 1000);
+setInterval(poll, 3000); poll();
+</script></body></html>
