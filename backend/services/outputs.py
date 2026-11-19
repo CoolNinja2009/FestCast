@@ -135,6 +135,7 @@ rtsp: no
 rtmp: no
 hls: no
 srt: no
+moq: no
 webrtc: yes
 webrtcAddress: :{self.ports['webrtc']}
 webrtcLocalUDPAddress: :{self.ports['ice']}
@@ -185,7 +186,7 @@ paths:
         if self.proc and self.proc.returncode is None:
             return
         self.choose_ports()
-        cfg = self.ctx.settings.data_dir / "mediamtx.yml"
+        cfg = (self.ctx.settings.data_dir / "mediamtx.yml").resolve()
         cfg.write_text(self.mtx_config(), "utf-8")
         self.want_mtx = True
         self.mtx_state = "starting"

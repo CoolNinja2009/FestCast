@@ -73,5 +73,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
+    s.data_dir = s.data_dir.resolve()  # absolute: child processes (MediaMTX) run in other folders
     s.data_dir.mkdir(parents=True, exist_ok=True)
     return s

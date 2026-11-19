@@ -8,10 +8,12 @@ video{width:100%;height:100%;object-fit:contain;background:#000}
 #ov.hide{display:none}#ov h1{margin:0;font-size:4vw}#ov p{margin:0;color:#aab;font-size:2vw}
 #bar{position:fixed;right:16px;bottom:16px;display:flex;gap:8px;opacity:0;transition:opacity .3s}
 body:hover #bar{opacity:1}button{background:#222a;color:#fff;border:1px solid #fff4;border-radius:8px;padding:10px 14px;font-size:16px}
+#snd{position:fixed;left:50%;bottom:8%;transform:translateX(-50%);font-size:22px;padding:14px 26px;background:#000c;border:1px solid #fff6;border-radius:12px}
 #diag{position:fixed;left:12px;top:12px;font:12px ui-monospace,monospace;background:#000a;padding:8px;border-radius:6px;display:none;white-space:pre}
 </style></head><body>
 <video id="v" autoplay playsinline muted></video>
-<div id="ov"><h1 id="t">FestCast</h1><p id="s">Connecting…</p><button id="snd" style="display:none">Tap for sound ▶</button></div>
+<div id="ov"><h1 id="t">FestCast</h1><p id="s">Connecting…</p></div>
+<button id="snd" style="display:none">🔊 Tap for sound</button>
 <div id="bar"><button id="fs">Fullscreen</button><button id="mute">Sound</button><button id="dg">Diagnostics</button></div>
 <div id="diag"></div>
 <script>
@@ -38,7 +40,7 @@ async function connect() {
     pc.ontrack = e => { if (v.srcObject !== e.streams[0]) v.srcObject = e.streams[0]; };
     pc.onconnectionstatechange = () => {
       const s = pc && pc.connectionState;
-      if (s === 'connected') { state = 'playing'; ov.classList.add('hide'); if (v.muted) document.getElementById('snd').style.display = ''; }
+      if (s === 'connected') { state = 'playing'; ov.classList.add('hide'); trySound(); }
       if (s === 'failed' || s === 'disconnected' || s === 'closed') { state = 'reconnecting'; status('Reconnecting…', 'The programme feed was interrupted'); again(2000); }
     };
     await pc.setLocalDescription(await pc.createOffer());
@@ -70,8 +72,15 @@ async function report() {
     if (r.status === 403) { revoked = true; await close(); status('Receiver revoked', 'Ask the producer for a new TV link.'); }
   } catch (e) {}
 }
-document.getElementById('snd').onclick = () => { v.muted = false; v.play(); document.getElementById('snd').style.display = 'none'; if (state === 'playing') ov.classList.add('hide'); };
-document.getElementById('mute').onclick = () => { v.muted = !v.muted; v.play(); };
+// Browsers only allow sound after a user gesture (some TVs allow it straight away): try, else show the button.
+function trySound() {
+  const btn = document.getElementById('snd');
+  v.muted = false;
+  v.play().then(() => { btn.style.display = 'none'; }).catch(() => { v.muted = true; v.play().catch(() => {}); btn.style.display = ''; });
+}
+document.getElementById('snd').onclick = () => { v.muted = false; v.play(); document.getElementById('snd').style.display = 'none'; };
+document.addEventListener('click', e => { if (v.muted && state === 'playing' && e.target.tagName !== 'BUTTON') document.getElementById('snd').click(); });
+document.getElementById('mute').onclick = () => { v.muted = !v.muted; v.play(); document.getElementById('snd').style.display = v.muted ? '' : 'none'; };
 document.getElementById('fs').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
 document.getElementById('dg').onclick = () => { const d = document.getElementById('diag'); d.style.display = d.style.display === 'block' ? 'none' : 'block'; };
 document.addEventListener('dblclick', () => document.getElementById('fs').click());

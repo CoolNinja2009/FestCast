@@ -9,9 +9,13 @@ $asset = "mediamtx_${Version}_windows_amd64.zip"
 $base = "https://github.com/bluenviron/mediamtx/releases/download/$Version"
 $zip = Join-Path $env:TEMP $asset
 Write-Host "Downloading $asset ..."
-Invoke-WebRequest "$base/$asset" -OutFile $zip
-$sums = (Invoke-WebRequest "$base/checksums.sha256").Content
-$expected = ($sums -split "`n" | Where-Object { $_ -match [regex]::Escape($asset) }) -replace "\s+.*$", ""
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest "$base/$asset" -OutFile $zip -UseBasicParsing
+$sumFile = Join-Path $env:TEMP "mediamtx_checksums.sha256"
+Invoke-WebRequest "$base/checksums.sha256" -OutFile $sumFile -UseBasicParsing
+$line = Get-Content $sumFile | Where-Object { $_ -match [regex]::Escape($asset) } | Select-Object -First 1
+Remove-Item $sumFile
+$expected = ($line -split "\s+")[0]
 $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
 if (-not $expected -or $expected.Trim().ToLower() -ne $actual) { throw "Checksum mismatch for $asset" }
 Expand-Archive $zip -DestinationPath $dest -Force
