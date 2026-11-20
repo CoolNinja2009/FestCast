@@ -26,6 +26,7 @@ from .mdns import Mdns
 from ..services.outputs import OutputService
 from ..services.presentations import PresentationService
 from ..services.production import ProductionService
+from ..services.workspace import WorkspaceService
 from ..services.recording import RecordingService
 from .events import EventBus, setup_logging
 
@@ -73,6 +74,7 @@ class Ctx:
         self.recording = RecordingService(self)
         self.outputs = OutputService(self)
         self.presentations = PresentationService(self)
+        self.workspace = WorkspaceService(self)
         self.audio = AudioService(self)
         self.metrics = MetricsService(self)
         self.previews: dict[str, str] = {}

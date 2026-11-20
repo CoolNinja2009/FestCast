@@ -2,6 +2,16 @@ import { act, api, clear, confirmBox, h, live, modal, store, toast } from '../li
 
 let openId: string | null = null;
 
+async function remove(p: any) {
+  const text = `Delete “${p.name}” and its ${p.slides.length} slide(s)? This can’t be undone.` +
+    (p.active ? ' It is the standby presentation: standby will show the branded card instead.' : '');
+  if (!await confirmBox('Delete presentation', text, 'Delete')) return;
+  if (await act(() => api('DELETE', `/api/presentations/${p.id}`), `Deleted ${p.name}`) && openId === p.id) {
+    openId = null;
+    store.set('_pres', Date.now());
+  }
+}
+
 async function upload(files: File[], name = '') {
   if (!files.length) return;
   const fd = new FormData();
@@ -58,7 +68,7 @@ function editor(p: any) {
         h('button.btn.sm', { onclick: () => player({ ...p, slides }) }, 'Preview'),
         p.active ? h('button.btn.sm', { onclick: () => act(() => api('POST', '/api/presentations/none/activate'), 'Standby uses the branded card') }, 'Deactivate')
           : h('button.btn.sm.green', { onclick: () => act(() => api('POST', `/api/presentations/${p.id}/activate`), 'Set as standby presentation') }, 'Use for standby'),
-        h('button.btn.sm.ghost.danger', { onclick: async () => { if (await confirmBox('Delete presentation', `Delete "${p.name}" and its rendered slides?`, 'Delete')) { await act(() => api('DELETE', `/api/presentations/${p.id}`)); openId = null; } } }, 'Delete'))),
+        h('button.btn.sm.ghost.danger', { onclick: () => remove(p) }, 'Delete'))),
     h('div.pb.col', null,
       h('div.form', null,
         h('label.f', null, 'Name', h('input', { type: 'text', value: p.name, onchange: (e: any) => save({ name: e.target.value }) })),
@@ -97,7 +107,9 @@ export function presentationsPage(el: HTMLElement) {
         items.length ? h('table.t', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Slides'), h('th', null, 'Transition'), h('th', null, 'Status'), h('th', null, '')),
           items.map((p: any) => h('tr', null, h('td', null, h('b', null, p.name)), h('td.num', null, `${p.slides.filter((s: any) => s.enabled !== false).length}/${p.slides.length}`),
             h('td', null, p.transition), h('td', null, p.active ? h('span.pill.ok', null, 'standby source') : ''),
-            h('td', { style: { textAlign: 'right' } }, h('button.btn.sm', { onclick: () => { openId = p.id; store.set('_pres', Date.now()); } }, 'Edit'))))) :
+            h('td', { style: { textAlign: 'right' } }, h('div.row', { style: { justifyContent: 'flex-end' } },
+              h('button.btn.sm', { onclick: () => { openId = p.id; store.set('_pres', Date.now()); } }, 'Edit'),
+              h('button.btn.sm.ghost.danger', { title: 'Delete this presentation', onclick: () => remove(p) }, 'Delete')))))) :
           h('div.pb.dim', null, 'No presentations yet.')];
     }),
     live(h('div'), ['_pres', 'presentations'], () => {

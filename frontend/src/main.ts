@@ -8,6 +8,7 @@ import { outputsPage } from './pages/outputs';
 import { recordingsPage } from './pages/recordings';
 import { networkPage } from './pages/network';
 import { settingsPage } from './pages/settings';
+import { fileMenu } from './components/filemenu';
 
 const PAGES: [string, string, (el: HTMLElement) => void][] = [
   ['overview', 'Overview', overviewPage],
@@ -49,8 +50,8 @@ function shell() {
               h('div.mono', null, s.public_base || '')];
     })));
   const top = h('header.top', null,
-    h('div.brand', null, h('i'), 'FestCast'),
-    live(h('div.row.grow'), ['cameras', 'obs', 'recording', 'production', 'server', 'link'], topBar));
+    h('div.lead', null, h('div.brand', null, h('i'), 'FestCast'), fileMenu()),
+    live(h('div.row.grow'), ['cameras', 'obs', 'recording', 'production', 'server', 'link', '_file'], topBar));
   main = h('main', { id: 'main' });
   clear(app, top, nav, main);
 }
@@ -63,7 +64,7 @@ function topBar() {
   const server = store.get('server') || {};
   const standby = p.standby_active;
   return [
-    h('span.prod', null, prod ? prod.name : 'No production'),
+    h('span.prod', { title: store.get('_file') ? `File: ${store.get('_file')}` : '' }, prod ? prod.name : 'No production'),
     prod ? h('span.tally', { class: p.started ? 'ok' : '' }, p.started ? 'STARTED' : 'NOT STARTED') : null,
     server.simulation ? h('span.tally.sim', { title: 'OBS is simulated: nothing here is a real camera, programme or recording' }, 'SIMULATION') : null,
     store.get('link') === 'down' ? h('span.tally.bad', null, 'DASHBOARD OFFLINE') : null,

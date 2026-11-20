@@ -6,6 +6,7 @@ import io
 import json
 import re
 import time
+from urllib.parse import quote
 
 import qrcode
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 
 from ..services.cameras import cam_scene_name
 from ..services.layouts import layout_scene
+from ..services.workspace import WorkspaceError
 
 router = APIRouter(prefix="/api")
 
@@ -79,6 +81,33 @@ async def create_production(request: Request, body: ProdIn):
 async def close_production(request: Request):
     await ctx(request).cameras.close_production()
     return ctx(request).cameras.snapshot()
+
+
+class NewProdIn(ProdIn):
+    keep: bool = True        # keep layouts and presentations
+
+
+@router.post("/production/new")
+async def new_production(request: Request, body: NewProdIn):
+    try:
+        return await ctx(request).workspace.new(body.name, body.cameras, body.keep)
+    except WorkspaceError as e:
+        raise HTTPException(409, str(e)) from None
+
+
+@router.get("/production/file")
+async def save_production_file(request: Request):
+    name, data = ctx(request).workspace.export()
+    return Response(data, media_type="application/x-festcast",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
+@router.post("/production/file")
+async def open_production_file(request: Request, file: UploadFile = File(...)):
+    try:
+        return await ctx(request).workspace.open(await file.read())
+    except WorkspaceError as e:
+        raise HTTPException(409, str(e)) from None
 
 
 @router.post("/production/start")
