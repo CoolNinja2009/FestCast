@@ -57,9 +57,22 @@ function preferH264(tr) {
   // phones encode H.264 in hardware: smoother and cooler than software VP8
   try {
     const caps = RTCRtpSender.getCapabilities('video').codecs;
-    const h = caps.filter(c => /h264/i.test(c.mimeType)), rest = caps.filter(c => !/h264/i.test(c.mimeType));
+    // and High profile first: the same picture in ~15% fewer bits than Baseline (better compression tools, same
+    // decoder in OBS). Phones that can't encode High simply don't list it, and Baseline is used as before.
+    const rank = c => { const m = /profile-level-id=([0-9a-f]{2})([0-9a-f]{2})/i.exec(c.sdpFmtpLine || ''), pr = m ? m[1].toLowerCase() : '';
+      return (pr === '64' ? 0 : pr === '4d' ? 1 : 2) + (/packetization-mode=1/.test(c.sdpFmtpLine || '') ? 0 : 3); };
+    const h = caps.filter(c => /h264/i.test(c.mimeType)).sort((a, b) => rank(a) - rank(b)), rest = caps.filter(c => !/h264/i.test(c.mimeType));
     if (h.length && tr.setCodecPreferences) tr.setCodecPreferences([...h, ...rest]);
   } catch (e) {}
+}
+// WebRTC starts every call at ~300 kbps and climbs; at that rate the phone's encoder picks 720p (or less) and can stay
+// there. On the festival LAN there is plenty of room, so start high and never fall below a 1080p-worthy floor.
+function startFast(sdp) {
+  const start = Math.round(info.bitrate_kbps * 0.7), min = Math.min(1500, Math.round(info.bitrate_kbps / 3));
+  const pts = new Set([...sdp.matchAll(/^a=rtpmap:(\d+) (H264|VP8|VP9|AV1)\//gmi)].map(m => m[1]));
+  return sdp.replace(/^a=fmtp:(\d+) (.*)$/gm, (line, pt, params) => pts.has(pt) && !/x-google-start-bitrate/.test(params)
+    ? `a=fmtp:${pt} ${params};x-google-start-bitrate=${start};x-google-min-bitrate=${min};x-google-max-bitrate=${info.bitrate_kbps}`
+    : line);
 }
 function waitIce(pc) { return new Promise(res => { if (pc.iceGatheringState === 'complete') return res();
   const t = setTimeout(res, 2000); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } }); }); }
@@ -80,6 +93,7 @@ async function connect() {
     if (!stream || stream.getVideoTracks().every(t => t.readyState === 'ended')) await getCamera();
     pc = new RTCPeerConnection({iceServers: []});
     const vt = stream.getVideoTracks()[0];
+    try { vt.contentHint = 'detail'; } catch (e) {}   // a stage camera: keep the picture sharp, never shrink it
     const tr = pc.addTransceiver(vt, {direction: 'sendonly', streams: [stream],
       sendEncodings: [{maxBitrate: info.bitrate_kbps * 1000, maxFramerate: info.fps}]});
     preferH264(tr);
@@ -96,10 +110,10 @@ async function connect() {
     if (r.status === 403) { want = false; await hangup(); setBadge('OFF'); show('Link not valid', await r.text(), true); return; }
     if (r.status !== 201) { setBadge('WAITING', 'wait'); show('Waiting for FestCast', (await r.text()).slice(0, 200)); return again(3000); }
     session = r.headers.get('X-Session');
-    await pc.setRemoteDescription({type: 'answer', sdp: await r.text()});
+    await pc.setRemoteDescription({type: 'answer', sdp: startFast(await r.text())});
     try {   // keep the resolution; let the frame rate give way first if the Wi-Fi gets tight
       const snd = tr.sender, p = snd.getParameters();
-      p.degradationPreference = 'balanced';
+      p.degradationPreference = 'maintain-resolution';
       if (p.encodings && p.encodings[0]) { p.encodings[0].maxBitrate = info.bitrate_kbps * 1000; p.encodings[0].maxFramerate = info.fps; }
       await snd.setParameters(p);
     } catch (e) {}
@@ -123,7 +137,9 @@ async function stats() {
     const kbps = lastOut ? Math.round((out.bytesSent - lastOut.b) * 8 / (now - lastOut.t)) : null;
     lastOut = {b: out.bytesSent, t: now};
     const lim = out.qualityLimitationReason && out.qualityLimitationReason !== 'none' ? ` · limited by ${out.qualityLimitationReason}` : '';
-    $('stats').textContent = `${out.frameWidth || '?'}×${out.frameHeight || '?'} · ${Math.round(out.framesPerSecond || 0)} fps · ${kbps ?? '…'} kbps${lim}`;
+    const cd = out.codecId && rep.get(out.codecId), pl = cd && /profile-level-id=([0-9a-f]{2})/i.exec(cd.sdpFmtpLine || '');
+    const codec = cd ? ' · ' + cd.mimeType.split('/')[1] + (pl ? ({'64': ' High', '4d': ' Main', '42': ' Baseline'})[pl[1].toLowerCase()] || '' : '') : '';
+    $('stats').textContent = `${out.frameWidth || '?'}×${out.frameHeight || '?'} · ${Math.round(out.framesPerSecond || 0)} fps · ${kbps ?? '…'} kbps${codec}${lim}`;
     $('stats').hidden = false;
   } catch (e) {}
 }
