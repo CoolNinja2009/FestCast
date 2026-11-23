@@ -82,7 +82,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m pytest -q
+      - name: Tests
+        run: |
+          set -o pipefail
+          python -m pytest -q -rfE --tb=short 2>&1 | tee pytest.txt || {
+            # each failure as an annotation, so it shows on the run page without opening the log
+            grep -E "^(FAILED|ERROR) " pytest.txt | head -10 | while read -r line; do echo "::error title=pytest::$line"; done
+            exit 1; }
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
