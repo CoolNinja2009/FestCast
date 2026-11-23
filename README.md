@@ -59,19 +59,21 @@ cd frontend && npm run typecheck && npm run build
 
 ## Releases
 
-`.github/workflows/release.yml`: push a tag and GitHub builds and publishes everything.
+Automatic (`.github/workflows/release.yml`): **every push to `main` that changes the app** is tested, built on
+Windows, Linux (x64, arm64) and macOS (arm64, Intel), smoke-tested and published as a GitHub release with all zips
+and `SHA256SUMS.txt`.
 
-```
-git tag v1.2.3
-git push origin v1.2.3
-```
+* Version: `pyproject.toml`'s version the first time, then the next patch each push (1.0.0, 1.0.1, 1.0.2 ...).
+  Set `version = "1.1.0"` (or `2.0.0`) in `pyproject.toml` to start a new series.
+* Not released: pushes that only change markdown/docs, `LICENSE`, `tests/` or editor files, and any commit whose
+  message contains `[skip ci]`.
+* A specific version: `git tag v1.2.3` and `git push origin v1.2.3` (a tag with `-`, like `v1.3.0-beta.1`, is a
+  pre-release).
+* Build without releasing: **Actions → Release → Run workflow** (zips kept as workflow artifacts).
 
-It runs the tests, builds a self-contained zip on Windows, Linux (x64, arm64) and macOS (arm64, Intel) with
-`packaging/build.py` (python-build-standalone CPython via uv, dependencies, built dashboard, MediaMTX pinned and
-checksum-verified, LICENSE, THIRD-PARTY-NOTICES.txt, README.txt), unzips and starts each one in simulation
-(`packaging/smoke.py`), then creates the GitHub release with all zips and `SHA256SUMS.txt`. A tag with a `-`
-(`v1.3.0-beta.1`) becomes a pre-release. **Actions → Release → Run workflow** builds without publishing (zips are
-kept as workflow artifacts). Local build: `python packaging/build.py --python-dir <uv python install dir>`.
+Each zip is made by `packaging/build.py` (python-build-standalone CPython via uv, dependencies, built dashboard,
+MediaMTX pinned and checksum-verified, LICENSE, THIRD-PARTY-NOTICES.txt, README.txt) and checked by
+`packaging/smoke.py`. Local build: `python packaging/build.py --python-dir <uv python install dir>`.
 
 ## Licence
 

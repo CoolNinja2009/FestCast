@@ -1,25 +1,78 @@
 # Builds self-contained FestCast packages for Windows, Linux and macOS and publishes them as a GitHub release.
-#   Release:   git tag v1.2.3 && git push origin v1.2.3     -> tests, 5 builds, release "FestCast 1.2.3" with all zips
-#   Try build: Actions > Release > Run workflow             -> same builds, zips kept as workflow artifacts only
+#
+#   Push to main  -> tests, 5 builds, smoke tests, release published automatically.
+#                    Version: pyproject.toml's version if that tag doesn't exist yet, else the next patch
+#                    (1.0.0, 1.0.1, 1.0.2 ...). Bump pyproject.toml to 1.1.0 / 2.0.0 to start a new series.
+#                    Pushes that only touch docs, README/markdown, LICENSE, tests or editor files are skipped,
+#                    and so is any push whose commit message contains [skip ci].
+#   Push a tag    -> git tag v1.2.3 && git push origin v1.2.3: release exactly that version (-beta etc. = pre-release).
+#   Run workflow  -> Actions > Release > Run workflow: builds; publishes only if "publish" is ticked.
 name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+    paths-ignore:                      # (path filters never apply to tag pushes)
+      - "**.md"
+      - "LICENSE"
+      - "docs/**"
+      - "tests/**"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".vscode/**"
+      - ".claude/**"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a release (next version) after building"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-concurrency:
+concurrency:                           # a newer push to main replaces a run that hasn't published yet
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
 
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "22"
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                 # all tags, to find the last release
+      - name: Decide version
+        id: v
+        run: |
+          base=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="${GITHUB_REF_NAME#v}"; publish=true
+          else
+            if ! git rev-parse -q --verify "refs/tags/v$base" >/dev/null; then
+              v="$base"
+            else
+              series="${base%.*}"
+              last=$(git tag -l "v$series.*" | grep -E "^v$series\.[0-9]+$" | sort -V | tail -1)
+              v="$series.$(( ${last##*.} + 1 ))"
+            fi
+            publish=true
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "${{ inputs.publish }}" != true ]]; then
+              v="$v-dev.${GITHUB_SHA::7}"; publish=false
+            fi
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "### FestCast $v (publish: $publish)" >> "$GITHUB_STEP_SUMMARY"
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -40,7 +93,7 @@ jobs:
         run: npm ci --no-fund --no-audit && npm run typecheck
 
   build:
-    needs: test
+    needs: [version, test]
     strategy:
       fail-fast: false
       matrix:
@@ -73,16 +126,9 @@ jobs:
           echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/standalone-python" >> "$GITHUB_ENV"
           UV_PYTHON_INSTALL_DIR="$RUNNER_TEMP/standalone-python" uv python install "$PYTHON_VERSION"
 
-      - name: Version
-        id: v
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev.${GITHUB_SHA::7}"; fi
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-
       - name: Package
         shell: bash
-        run: python packaging/build.py --python-dir "$UV_PYTHON_INSTALL_DIR" --version "${{ steps.v.outputs.version }}"
+        run: python packaging/build.py --python-dir "$UV_PYTHON_INSTALL_DIR" --version "${{ needs.version.outputs.version }}"
 
       - name: Smoke test the zip (unzips it, starts FestCast in simulation, checks dashboard + MediaMTX)
         shell: bash
@@ -96,8 +142,8 @@ jobs:
           compression-level: 0
 
   publish:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build]
+    if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -112,8 +158,9 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.version.outputs.version }}
         run: |
-          v="${GITHUB_REF_NAME#v}"
-          pre=""; [[ "$v" == *-* ]] && pre="--prerelease"
-          gh release create "$GITHUB_REF_NAME" dist/FestCast-*.zip dist/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" --title "FestCast $v" --generate-notes $pre
+          pre=""; [[ "$V" == *-* ]] && pre="--prerelease"
+          # creates tag v$V on the built commit (a tag made with this token does not start another run)
+          gh release create "v$V" dist/FestCast-*.zip dist/SHA256SUMS.txt --target "$GITHUB_SHA" \
+            --repo "$GITHUB_REPOSITORY" --title "FestCast $V" --generate-notes $pre

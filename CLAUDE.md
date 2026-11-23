@@ -7,8 +7,9 @@ Live production system for a school festival. Read `docs/ARCHITECTURE.md` first 
 - Run: `start.bat` (real OBS), `start-simulation.bat` (mock OBS), or `.venv\Scripts\python -m backend.main --simulation --port 8010 --data-dir data-sim`
 - Backend tests: `.venv\Scripts\python -m pytest -q` (all against `obs/mock.py`; fast)
 - Frontend: `cd frontend && npm run typecheck && npm run build` (the backend serves `frontend/dist`)
-- Release: tag `v*` and push -> `.github/workflows/release.yml` (tests, 5 platform zips via `packaging/build.py`,
-  smoke test, auto-published GitHub release). Bundled Python always runs with `-E -s` (no user site / PYTHON* leaks).
+- Release: every push to main touching the app auto-publishes the next version (pyproject version, then +1 patch;
+  docs/md/LICENSE/tests-only pushes and `[skip ci]` skip it); `v*` tags release that exact version.
+  `.github/workflows/release.yml`: tests, 5 platform zips via `packaging/build.py`, smoke test, GitHub release. Bundled Python always runs with `-E -s` (no user site / PYTHON* leaks).
   No Claude co-author lines in commits (GPL-3.0 repo on GitHub).
 - New DB column: edit `backend/database/models.py`, then `.venv\Scripts\python -m alembic revision --autogenerate -m "..."`
 
