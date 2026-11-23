@@ -2,13 +2,17 @@
 (start_mtx / HTTP forwarding); the token checks, routing and stats handling are FestCast's."""
 from __future__ import annotations
 
+import sys
+
 from conftest import LIVE_1080, REMOTE  # noqa: F401
 
 from backend.services.cameras import cam_input_name
 
 
 def _local_env(env_factory):
-    e = env_factory(camera_transport="local", https_port=8443)
+    # MediaMTX is faked below, but FestCast first checks one is installed: point at any existing file, so the tests
+    # don't depend on tools/mediamtx being present (it isn't on CI)
+    e = env_factory(camera_transport="local", https_port=8443, mediamtx_path=sys.executable)
     calls: list[tuple] = []
 
     async def fake_start():
