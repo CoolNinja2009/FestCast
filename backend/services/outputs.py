@@ -44,7 +44,7 @@ class OutputService:
         self._not_ready_since: float | None = None
         self.heals = 0
         self.adopted_pid: int | None = None   # MediaMTX left running by a previous FestCast, still serving TVs
-        self.ports = {"webrtc": ctx.settings.mediamtx_webrtc_port, "ice": 8189, "api": 9997}
+        self.ports = {"webrtc": ctx.settings.mediamtx_webrtc_port, "ice": 8189, "api": 9997, "rtsp": 8554}
 
     # -- receivers ----------------------------------------------------------------------------------
     def receivers(self) -> list[Receiver]:
@@ -149,7 +149,10 @@ logLevel: info
 logDestinations: [stdout]
 api: yes
 apiAddress: 127.0.0.1:{self.ports['api']}
-rtsp: no
+# RTSP on loopback only, TCP only (no RTP/RTCP UDP ports): live.py's ffmpeg reads the programme here
+rtsp: yes
+rtspTransports: [tcp]
+rtspAddress: 127.0.0.1:{self.ports['rtsp']}
 rtmp: no
 hls: no
 srt: no
@@ -190,7 +193,7 @@ paths:
         if len(pids) != 1:
             return None
         last = P.remembered(self.ctx.settings.data_dir)
-        if not all(k in last for k in ("mtx_webrtc", "mtx_api", "mtx_ice")):
+        if not all(k in last for k in ("mtx_webrtc", "mtx_api", "mtx_ice", "mtx_rtsp")):
             return None
         try:
             async with httpx.AsyncClient(timeout=2) as c:
@@ -199,7 +202,8 @@ paths:
                 return None
         except httpx.HTTPError:
             return None
-        self.ports = {"webrtc": last["mtx_webrtc"], "ice": last["mtx_ice"], "api": last["mtx_api"]}
+        self.ports = {"webrtc": last["mtx_webrtc"], "ice": last["mtx_ice"], "api": last["mtx_api"],
+                      "rtsp": last["mtx_rtsp"]}
         return pids[0]
 
     @staticmethod
@@ -225,16 +229,19 @@ paths:
         own.add(web)
         api = P.pick([last.get("mtx_api"), 9997], range(9998, 10100), avoid=own)
         own.add(api)
+        rtsp = P.pick([last.get("mtx_rtsp"), 8554], range(8555, 8650), avoid=own)
+        own.add(rtsp)
         ice = None
         for cand in [last.get("mtx_ice"), 8189, *range(8190, 8290)]:
             if cand and cand not in own and P.udp_free(cand) and P.tcp_free(cand):
                 ice = cand
                 break
         ice = ice or P.pick([], range(0), udp=True, avoid=own)
-        if (web, ice, api) != (self.ports["webrtc"], self.ports["ice"], self.ports["api"]):
-            log.info("MediaMTX ports: webrtc %s, ice %s, api %s", web, ice, api)
-        self.ports = {"webrtc": web, "ice": ice, "api": api}
-        P.remember(d, mtx_webrtc=web, mtx_api=api, mtx_ice=ice)
+        new = {"webrtc": web, "ice": ice, "api": api, "rtsp": rtsp}
+        if new != self.ports:
+            log.info("MediaMTX ports: webrtc %s, ice %s, api %s, rtsp %s", web, ice, api, rtsp)
+        self.ports = new
+        P.remember(d, mtx_webrtc=web, mtx_api=api, mtx_ice=ice, mtx_rtsp=rtsp)
 
     async def start_mtx(self) -> None:
         exe = self.ctx.settings.mediamtx
@@ -462,6 +469,9 @@ paths:
             self.ensure_watchdog()
 
     async def stop_programme(self, restore_service: bool = True) -> None:
+        if self.ctx.live.on:
+            raise ValueError("The live stream (YouTube, Twitch, ...) is fed from the programme output. "
+                             "Stop the live stream first.")
         self.want_programme = False
         self.ctx.db.set("tv_output_on", False)
         obs = self.ctx.obs

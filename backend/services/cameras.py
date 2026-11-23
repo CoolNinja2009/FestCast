@@ -126,11 +126,62 @@ class CameraService:
     def adapter_of(self, c: Camera) -> CameraInputAdapter:
         return self.adapters.get(c.transport or "vdoninja", self.adapter)
 
+    def picture_aspect(self, c: Camera) -> float | None:
+        """Aspect of the camera's picture as it appears (after its rotation), from the resolution actually received;
+        None while unknown."""
+        st = self.live.get(c.id) or {}
+        w, h = st.get("width"), st.get("height")
+        if not w or not h:
+            return None
+        return h / w if (c.rotation or 0) in (90, 270) else w / h
+
+    def auto_turn(self, cid: str) -> bool:
+        """Operator switch (Cameras page / layout editor): follow the phone's motion sensor. On by default."""
+        return self.ctx.db.get(f"cam_autoturn:{cid}", True) is not False
+
+    async def phone_held(self, cid: str, held: int) -> int:
+        """The phone page reports how it is held (motion sensor; see the /orientation endpoint)."""
+        st = self.live.setdefault(cid, {})
+        if st.get("held") != held:
+            log.info("camera %s: phone reports it is held %s", self.camera(cid).name,
+                     "upright" if held == 0 else f"sideways ({held})")
+        st["held"], st["held_at"] = held, time.time()
+        rot = await self.apply_held(cid)
+        self.publish()
+        return rot
+
+    async def apply_held(self, cid: str) -> int:
+        """Rotation for a phone from how it is held: the held turn while the received frames are tall, 0 when they
+        are wide. Does nothing while the operator has auto-turn off."""
+        c = self.camera(cid)
+        st = self.live.get(cid) or {}
+        if not self.auto_turn(cid) or "held" not in st or not st.get("width") or not st.get("height"):
+            return c.rotation or 0
+        rot = st["held"] if st["height"] > st["width"] else 0
+        if (c.rotation or 0) != rot:
+            log.info("camera %s: phone held %s, frames %sx%s -> picture turned %s", c.name, st["held"], st["width"],
+                     st["height"], rot)
+            await self.update_camera(cid, rotation=rot)
+        return rot
+
+    def source_size(self, c: Camera, prod: Production | None = None) -> tuple[int, int]:
+        """Size of the camera's OBS browser source: exactly the picture's shape (an upright phone gives a tall
+        source), so the source has no bars and a layout tile simply fits it. Until the picture is known, and for a
+        camera set to fill its frame, it is the production canvas (16:9)."""
+        prod = prod or self.production()
+        cw, ch = (prod.canvas_w, prod.canvas_h) if prod else (1920, 1080)
+        a = self.picture_aspect(c)
+        if not a or (c.frame or "fit") == "fill" or abs(a - cw / ch) < 0.01:
+            return cw, ch
+        long = max(cw, ch)
+        return (long, max(2, round(long / a))) if a >= 1 else (max(2, round(long * a)), long)
+
     def cam_dict(self, c: Camera, prod: Production | None = None) -> dict:
         prod = prod or self.production()
+        sw, sh = self.source_size(c, prod)
         return {"id": c.id, "name": c.name, "stream_id": c.stream_id, "password": prod.vdo_password if prod else "",
                 "resolution_target": c.resolution_target, "bitrate_kbps": c.bitrate_kbps, "fps": prod.fps if prod else 30,
-                "canvas_w": prod.canvas_w if prod else 1920, "canvas_h": prod.canvas_h if prod else 1080}
+                "canvas_w": sw, "canvas_h": sh}
 
     # -- production -------------------------------------------------------------------
     async def create_production(self, name: str, cameras: int = 3) -> Production:
@@ -219,6 +270,8 @@ class CameraService:
                 if fields["transport"] not in TRANSPORTS:
                     raise ValueError("transport must be local or vdoninja")
                 c.transport = fields["transport"]
+            if "auto_turn" in fields:
+                self.ctx.db.set(f"cam_autoturn:{cid}", bool(fields["auto_turn"]))
             if "frame" in fields:
                 if fields["frame"] not in ("fit", "fill"):
                     raise ValueError("frame must be fit or fill")
@@ -242,6 +295,11 @@ class CameraService:
             self.bump_reload(cid)
         if "transport" in fields and old.transport != c.transport:
             await self.refresh_obs_page(cid)
+        if fields.get("auto_turn"):
+            await self.apply_held(cid)                  # switched on: follow the phone right away
+            c = self.camera(cid)
+        if (old.rotation or 0, old.frame or "fit") != (c.rotation or 0, c.frame or "fit"):
+            self.ctx.layouts.camera_changed_shape(cid)
         self.publish()
         return c
 
@@ -348,6 +406,7 @@ class CameraService:
             kind, settings = self.adapter_of(c).obs_source(self.cam_dict(c), self.wrapper_url(cid))
             await self.ctx.obs.ensure_input(cam_input_name(cid), kind, settings, scene, "camera", cid)
             await self.ctx.obs.fit_full(scene, cam_input_name(cid))
+            await self.ctx.audio.attach(scene)
             await self.ctx.obs.call("SetInputMute", {"inputName": cam_input_name(cid),
                                                      "inputMuted": not c.audio_active})
         except ObsError as e:
@@ -395,6 +454,10 @@ class CameraService:
         has_video = bool(parsed and (parsed["width"] or (parsed["bitrate_kbps"] or 0) > 0))
         prev_status = st.get("status")
         if has_video:
+            def shape(d: dict) -> float | None:
+                return round(d["width"] / d["height"], 2) if d.get("width") and d.get("height") else None
+            if shape(parsed) and shape(parsed) != shape(st):
+                self.ctx.layouts.camera_changed_shape(cid)
             st.update(parsed)
             st["last_seen"] = t
             st["raw"] = stats
@@ -406,7 +469,7 @@ class CameraService:
             st["status"] = status
             self._history(c, status)
         return {"ok": True, "reload": self.reload_nonce.get(cid, 0), "rotation": c.rotation or 0,
-                "frame": c.frame or "fit"}
+                "frame": c.frame or "fit", "width": st.get("width"), "height": st.get("height")}
 
     def _status(self, c: Camera, st: dict, t: float) -> str:
         if not c.enabled:
@@ -548,6 +611,10 @@ class CameraService:
             "enabled": c.enabled, "resolution_target": c.resolution_target, "bitrate_kbps": c.bitrate_kbps,
             "audio_active": c.audio_active, "obs_input": cam_input_name(c.id), "obs_scene": cam_scene_name(c.name),
             "rotation": c.rotation or 0, "frame": c.frame or "fit",
+            "auto_turn": self.auto_turn(c.id),
+            "tally": self.ctx.tally.state(c.id),       # program | preview | off | unknown (what the phone shows)
+            # what the phone's motion sensor last said: None = never reported (no motion access / old page)
+            "held": st.get("held"), "held_at": st.get("held_at"),
             "portrait": bool(st.get("status") == "live" and st.get("width") and st.get("height")
                              and st["height"] > st["width"] and (c.rotation or 0) in (0, 180)),
             "status": st.get("status", "no_probe"), "last_seen": st.get("last_seen"),

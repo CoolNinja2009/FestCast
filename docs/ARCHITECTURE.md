@@ -29,7 +29,7 @@ backend/
   services/recording.py   OBS profile config, confirmed state, history, metadata.json, ffprobe, remux
   services/outputs.py     receivers, MediaMTX process, WHEP proxy, HDMI projectors
   services/presentations.py  PDF/PPTX/image import → PNG slides (threaded)
-  services/audio.py       mixer, meters, clipping warnings
+  services/audio.py       mixer, meters, clipping warnings; hall inputs (mic in / line in)
   services/metrics.py     central aggregation loop + rolling history
   api/admin.py            operator REST API
   api/public.py           /join, /tv, /obs pages, token-gated JSON, login, /api/ws
@@ -54,6 +54,14 @@ receiver/tv.html          TV WHEP player
   video's real aspect (from getStats) and rotates/fits/fills it with CSS, per camera (`rotation`, `frame`).
 * **Previews via OBS screenshots** (`GetSourceScreenshot`, ~0.7 fps) instead of extra WebRTC viewers, so each phone
   uploads exactly one stream.
+* **Hall audio inputs** (mic in / line in, Audio page). OBS captures them itself (`wasapi_input_capture`,
+  `use_device_timing: false`): no extra hop, and a drifting sound-card clock cannot raise OBS's audio buffering.
+  Processing is zero-latency only: noise gate → gain → limiter (`FC Gate`/`FC Gain`/`FC Limiter`, no look-ahead);
+  noise suppression is not offered (10-20 ms+). Inputs `FC_AUDIO_<id>` live in the owned scene `FC Audio`, nested into
+  every FestCast scene (layouts, camera scenes, standby), so the hall sound stays on air through every cut and
+  transition (the same source in both scenes: no dip). Config in KV `audio_inputs`. Track 1 = programme; an input can
+  also get its own isolated track 2-6: owned inputs leave that track, non-owned ones are only reported, and in OBS
+  Advanced output mode `AdvOut.RecTracks` gains those bits at record start (OR-ed, never removing operator tracks).
 * **Unknown ≠ zero.** Metrics are `None` when not measured. VDO.Ninja does not always report packet loss; the UI shows
   "—" rather than inventing 0%.
 * **Ownership registry** (`obs_owned` table). FestCast only removes/renames inputs and scenes it created. Names:
@@ -72,6 +80,19 @@ receiver/tv.html          TV WHEP player
 * **TV output** uses OBS's streaming output (WHIP), so OBS cannot stream elsewhere at the same time. TVs post their
   WHEP offer to FestCast, which checks the receiver token and forwards it to MediaMTX on localhost; MediaMTX only
   accepts loopback. Media then flows MediaMTX → TV over UDP 8189.
+* **Tally lights** (`services/tally.py`): a camera is "program"/"preview" when its OBS input `FC_CAM_<id>` is a visible
+  item of the programme / preview scene, directly or through nested scenes and groups (read with `GetSceneItemList`,
+  never inferred from FestCast's own records). Recomputed on OBS scene / scene-item events and every 1 s; OBS down =
+  "unknown". Phones (cam.html, vcam.html) long-poll `/api/public/cam/<token>/tally?v=<version>` (answers at once on
+  change, else after 20 s), so no WebSocket is needed on the https listener.
+* **Live streaming to platforms** (`services/live.py`) can't use OBS's stream output (the TVs have it), so it is fed
+  from MediaMTX: one ffmpeg per destination reads the programme over RTSP (loopback, TCP only) and pushes it to
+  RTMP/RTMPS (FLV) or SRT (MPEG-TS). Video is `-c:v copy` (FestCast still never encodes video); audio Opus → AAC.
+  Going live starts the TV output if needed; the TV output can't be stopped under a live stream. Each destination is
+  independent and restarted with backoff (2 → 30 s) when ffmpeg exits or sends nothing for 20 s. "Sending" means
+  ffmpeg's `-progress` byte count is growing; the platform's side is not claimed. Destinations + keys in KV
+  `live_destinations`; keys masked in views, redacted from ffmpeg output and diagnostics. `live_on` survives restarts;
+  ffmpegs left by a killed FestCast (`data/live_pids.json`) are stopped before resuming, so two never share a key.
 * **Security.** Loopback is the operator; remote operators need `FESTCAST_ADMIN_PASSWORD`; phones/TVs only get
   random revocable tokens; `/obs/*` pages need loopback + a local key; OBS password never leaves the server;
   support bundles redact stream ids, tokens and passwords.

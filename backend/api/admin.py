@@ -37,7 +37,7 @@ async def state(request: Request):
     c = ctx(request)
     return {"obs": c.obs.public_state(), "cameras": c.cameras.snapshot(), "production": c.production.view(),
             "layouts": c.layouts.snapshot(), "recording": c.recording.view(), "outputs": c.outputs.view(),
-            "presentations": c.presentations.snapshot(), "metrics": c.metrics.latest,
+            "live": c.live.view(), "presentations": c.presentations.snapshot(), "metrics": c.metrics.latest,
             "notifications": list(c.bus.notifications)[:50], "previews": c.previews,
             "server": {"lan_ip": c.lan_ip, "port": c.settings.port, "public_base": c.public_base, "ip_base": c.ip_base,
                        "simulation": c.settings.simulation, "remote_access": bool(c.settings.admin_password),
@@ -139,6 +139,7 @@ class CamPatch(BaseModel):
     rotation: int | None = None
     frame: str | None = None
     transport: str | None = None
+    auto_turn: bool | None = None
 
 
 @router.patch("/cameras/{cid}")
@@ -214,7 +215,9 @@ async def camera_golive(request: Request, cid: str, transition: str | None = Non
 async def scenes(request: Request):
     c = ctx(request)
     names = await c.obs.scenes()
-    return [{"name": n, "owned": bool(c.obs.owned(n))} for n in names]
+    rows = {n: c.obs.owned(n) for n in names}
+    # the FC Audio bus is nested into every FestCast scene; it is not a scene to put on air
+    return [{"name": n, "owned": bool(rows[n])} for n in names if not (rows[n] and rows[n].role == "audiobus")]
 
 
 class SceneIn(BaseModel):
@@ -288,6 +291,7 @@ async def standby_override(request: Request, mode: str):
 class LayoutIn(BaseModel):
     name: str | None = None
     elements: list[dict] | None = None
+    auto_arrange: bool | None = None
 
 
 @router.get("/layouts")
@@ -304,7 +308,8 @@ async def create_layout(request: Request, body: LayoutIn):
 @router.put("/layouts/{lid}")
 async def update_layout(request: Request, lid: str, body: LayoutIn, sync: bool = True):
     c = ctx(request)
-    return c.layouts.view(await c.layouts.update(lid, body.name, body.elements, sync=sync))
+    return c.layouts.view(await c.layouts.update(lid, body.name, body.elements, sync=sync,
+                                                 auto_arrange=body.auto_arrange))
 
 
 @router.post("/layouts/{lid}/duplicate")
@@ -419,6 +424,15 @@ async def delete_presentation(request: Request, pid: str):
 async def activate_presentation(request: Request, pid: str):
     ctx(request).presentations.activate(pid if pid != "none" else None)
     return ctx(request).presentations.snapshot()
+
+
+@router.post("/presentations/control")
+async def presentation_control(request: Request, body: dict):
+    """Manual slide control on the standby page: next, prev, goto (index from 0), pause, play."""
+    try:
+        return ctx(request).presentations.control(str(body.get("action")), body.get("index"))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
 
 
 @router.put("/standby/message")
@@ -606,6 +620,51 @@ async def mediamtx(request: Request, action: str):
     return o.view()
 
 
+# -- live stream to platforms (YouTube, Twitch, ...) -----------------------------------------------------------
+@router.get("/live")
+async def live_view(request: Request):
+    return ctx(request).live.view()
+
+
+@router.post("/live/destinations")
+async def live_add(request: Request, body: dict):
+    c = ctx(request)
+    c.live.add(body)
+    return c.live.view()
+
+
+@router.patch("/live/destinations/{did}")
+async def live_update(request: Request, did: str, body: dict):
+    c = ctx(request)
+    try:
+        await c.live.update(did, body)
+    except KeyError:
+        raise HTTPException(404)
+    return c.live.view()
+
+
+@router.delete("/live/destinations/{did}")
+async def live_remove(request: Request, did: str):
+    c = ctx(request)
+    try:
+        await c.live.remove(did)
+    except KeyError:
+        raise HTTPException(404)
+    return c.live.view()
+
+
+@router.post("/live/start")
+async def live_start(request: Request):
+    await ctx(request).live.start()
+    return ctx(request).live.view()
+
+
+@router.post("/live/stop")
+async def live_stop(request: Request):
+    await ctx(request).live.stop()
+    return ctx(request).live.view()
+
+
 @router.get("/outputs/monitors")
 async def monitors(request: Request):
     return await ctx(request).outputs.monitors()
@@ -633,6 +692,51 @@ class AudioIn(BaseModel):
 @router.patch("/audio/{name}")
 async def audio_set(request: Request, name: str, body: AudioIn):
     await ctx(request).audio.set(name, **body.model_dump(exclude_none=True))
+    return {"ok": True}
+
+
+# hall audio inputs: mic in / line in as low-latency WASAPI capture inputs (see services/audio.py)
+@router.get("/audio-inputs")
+async def audio_inputs(request: Request):
+    return await ctx(request).audio.inputs_view()
+
+
+@router.get("/audio-inputs/devices")
+async def audio_devices(request: Request):
+    return await ctx(request).audio.devices()
+
+
+class AudioInputNew(BaseModel):
+    name: str = ""
+    kind: str = "mic"
+    device_id: str = "default"
+    iso_track: int | None = None
+
+
+@router.post("/audio-inputs")
+async def audio_input_add(request: Request, body: AudioInputNew):
+    return await ctx(request).audio.add_input(body.name, body.kind, body.device_id, body.iso_track)
+
+
+class AudioInputPatch(BaseModel):
+    name: str | None = None
+    kind: str | None = None
+    device_id: str | None = None
+    gain_db: float | None = None
+    gate: bool | None = None
+    limiter: bool | None = None
+    iso_track: int | None = None
+
+
+@router.patch("/audio-inputs/{aid}")
+async def audio_input_set(request: Request, aid: str, body: AudioInputPatch):
+    # exclude_unset (not exclude_none): "iso_track": null turns the isolated track off
+    return await ctx(request).audio.update_input(aid, body.model_dump(exclude_unset=True))
+
+
+@router.delete("/audio-inputs/{aid}")
+async def audio_input_remove(request: Request, aid: str):
+    await ctx(request).audio.remove_input(aid)
     return {"ok": True}
 
 

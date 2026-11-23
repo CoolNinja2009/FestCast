@@ -61,6 +61,58 @@ class PresentationService:
         self.root = ctx.settings.data_dir / "presentations"
         self.root.mkdir(parents=True, exist_ok=True)
         self.nonce = 0
+        # manual control of the standby page: it reports the slide it shows (pos); a command is "go to slide N",
+        # numbered by cmd_seq so the page acts on each one once; paused stops the slide timers
+        self.pos: int | None = None
+        self.paused = False
+        self.cmd_seq = 0
+        self.cmd_index = 0
+
+    def slide_count(self) -> int:
+        return len(self.player_state()["slides"])
+
+    def control(self, action: str, index: int | None = None) -> dict:
+        n = self.slide_count()
+        if action == "pause":
+            self.paused = True
+        elif action == "play":
+            self.paused = False
+        elif action in ("next", "prev", "goto"):
+            if not n:
+                raise ValueError("No presentation with slides is on standby")
+            cur = self.pos if self.pos is not None else 0
+            if action == "goto":
+                if index is None or not 0 <= int(index) < n:
+                    raise ValueError(f"slide must be 1 to {n}")
+                target = int(index)
+            else:
+                target = (cur + (1 if action == "next" else -1)) % n
+            self.cmd_seq += 1
+            self.cmd_index = target
+            self.pos = target
+        else:
+            raise ValueError("action must be next, prev, goto, pause or play")
+        self.publish()
+        return self.player()
+
+    def player(self) -> dict:
+        n = self.slide_count()
+        return {"pos": self.pos if self.pos is not None and self.pos < n else None, "count": n, "paused": self.paused}
+
+    def reported(self, at: str | None, seq: str | None = None) -> None:
+        """The standby page tells us which slide it is showing (ignored until it has applied the latest command, so
+        a report from just before a Next can't undo it)."""
+        if seq not in (None, "") and seq != str(self.cmd_seq):
+            return
+        try:
+            pos = int(at) if at not in (None, "") else None
+        except ValueError:
+            return
+        if pos is not None and pos < 0:
+            pos = None
+        if pos != self.pos:
+            self.pos = pos
+            self.publish()
 
     def all(self) -> list[Presentation]:
         with self.ctx.db.session() as s:
@@ -185,6 +237,7 @@ class PresentationService:
             self.get(pid)
         self.ctx.db.set("active_presentation", pid)
         self.nonce += 1
+        self.pos = None
         self.publish()
 
     def slide_path(self, pid: str, file: str) -> Path | None:
@@ -199,7 +252,7 @@ class PresentationService:
         prod = self.ctx.cameras.production()
         st = {"nonce": self.nonce, "event": prod.name if prod else "FestCast", "slides": [], "transition": "fade",
               "background": "#000000", "branding": "", "message": self.ctx.db.get("standby_message")
-              or "We'll be right back"}
+              or "We'll be right back", "paused": self.paused, "cmd_seq": self.cmd_seq, "cmd_index": self.cmd_index}
         if pid:
             try:
                 p = self.get(pid)
@@ -220,7 +273,7 @@ class PresentationService:
     def snapshot(self) -> dict:
         return {"items": [self.view(p) for p in self.all()], "active": self.ctx.db.get("active_presentation"),
                 "message": self.ctx.db.get("standby_message") or "We'll be right back",
-                "pptx_supported": bool(self.ctx.settings.soffice)}
+                "pptx_supported": bool(self.ctx.settings.soffice), "player": self.player()}
 
     def publish(self) -> None:
         self.ctx.bus.publish("presentations", self.snapshot())

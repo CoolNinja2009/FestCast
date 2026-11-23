@@ -38,7 +38,12 @@ async function connect() {
     pc = new RTCPeerConnection({iceServers: []});
     pc.addTransceiver('video', {direction: 'recvonly'});
     pc.addTransceiver('audio', {direction: 'recvonly'});
-    pc.ontrack = e => { if (v.srcObject !== e.streams[0]) v.srcObject = e.streams[0]; };
+    pc.ontrack = e => {
+      // keep the TV's own buffer small (~100 ms; Chrome's default can grow much larger on Wi-Fi)
+      try { e.receiver.jitterBufferTarget = 100; } catch (x) {}
+      try { if (!('jitterBufferTarget' in e.receiver)) e.receiver.playoutDelayHint = 0.1; } catch (x) {}
+      if (v.srcObject !== e.streams[0]) v.srcObject = e.streams[0];
+    };
     pc.onconnectionstatechange = () => {
       const s = pc && pc.connectionState;
       if (s === 'connected') { state = 'playing'; ov.classList.add('hide'); trySound(); }

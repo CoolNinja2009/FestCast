@@ -88,3 +88,23 @@ def _zip(files: dict[str, bytes]) -> bytes:
         for k, v in files.items():
             z.writestr(k, v)
     return b.getvalue()
+
+
+def test_manual_slide_control(env):
+    files = [("files", (f"{n}.png", _png(), "image/png")) for n in "abc"]
+    pid = env.client.post("/api/presentations", data={"name": "Deck"}, files=files).json()["id"]
+    assert env.client.post("/api/presentations/control", json={"action": "next"}).status_code == 400  # none active
+    env.client.post(f"/api/presentations/{pid}/activate")
+    k = env.ctx.local_key
+    st = env.client.get("/obs/standby/state", params={"k": k, "at": 0}).json()   # the page shows slide 1
+    assert len(st["slides"]) == 3 and st["paused"] is False
+    r = env.client.post("/api/presentations/control", json={"action": "pause"}).json()
+    assert r == {"pos": 0, "count": 3, "paused": True}
+    assert env.client.post("/api/presentations/control", json={"action": "prev"}).json()["pos"] == 2   # wraps
+    st = env.client.get("/obs/standby/state", params={"k": k, "at": 2}).json()
+    assert st["cmd_index"] == 2 and st["paused"] is True and st["cmd_seq"] == 1
+    env.client.post("/api/presentations/control", json={"action": "next"})
+    assert env.client.get("/obs/standby/state", params={"k": k}).json()["cmd_index"] == 0
+    assert env.client.post("/api/presentations/control", json={"action": "goto", "index": 5}).status_code == 400
+    assert env.client.post("/api/presentations/control", json={"action": "goto", "index": 1}).json()["pos"] == 1
+    assert env.client.get("/api/presentations").json()["player"]["pos"] == 1

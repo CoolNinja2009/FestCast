@@ -54,9 +54,11 @@ class VdoNinjaInputAdapter(CameraInputAdapter):
         return self.base + "?" + "&".join(p)
 
     def view_url(self, cam: dict) -> str:
-        # videobitrate is requested by the viewer (kbps); cleanoutput hides all VDO.Ninja UI for OBS
+        # videobitrate is requested by the viewer (kbps); cleanoutput hides all VDO.Ninja UI for OBS.
+        # Latency (docs.vdo.ninja): buffer=0 asks for the smallest WebRTC jitter buffer; lowlatency is the
+        # documented preset (no audio buffer/sync node, 10 ms audio packets, no web-audio). Viewer-side only.
         return (self.base + f"?view={cam['stream_id']}&password={quote(cam['password'])}"
-                f"&videobitrate={int(cam.get('bitrate_kbps', 6000))}&cleanoutput")
+                f"&videobitrate={int(cam.get('bitrate_kbps', 6000))}&cleanoutput&buffer=0&lowlatency")
 
     def obs_source(self, cam: dict, wrapper_url: str) -> tuple[str, dict]:
         return "browser_source", {"url": wrapper_url, "width": cam.get("canvas_w", 1920),

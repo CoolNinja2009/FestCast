@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 import shutil
 import socket
 import time
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import psutil
@@ -30,6 +33,44 @@ def lan_ip() -> str:
         s.close()
 
 
+_BUF = re.compile(r"total audio buffering is now (\d+) milliseconds(?: \(source: (.+?)\))?")
+
+
+class ObsLogWatch:
+    """Reads OBS's own log (newest file in OBS's config folder /logs, i.e. the running OBS) for audio buffering.
+    When an audio source runs late OBS raises its audio buffer (up to 960 ms) and never lowers it until OBS restarts;
+    the stream's video is held back by the same amount, so TVs see the picture that much later. obs-websocket does not
+    expose this, the log does: "adding N milliseconds of audio buffering, total audio buffering is now N ms
+    (source: X)". Read incrementally."""
+
+    def __init__(self, log_dir: Path | None = None) -> None:
+        from ..obs.launcher import config_dir
+        self.dir = log_dir or config_dir() / "logs"
+        self.file: Path | None = None
+        self.pos = 0
+        self.ms: int | None = None
+        self.source: str | None = None
+
+    def check(self) -> tuple[int | None, str | None]:
+        try:
+            if not self.dir or not self.dir.is_dir():
+                return None, None
+            files = sorted(self.dir.glob("*.txt"), key=lambda f: f.stat().st_mtime)
+            if not files:
+                return None, None
+            if files[-1] != self.file:              # OBS restarted: a new log, buffering starts at 0
+                self.file, self.pos, self.ms, self.source = files[-1], 0, 0, None
+            with open(self.file, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(self.pos)
+                chunk = f.read(2_000_000)
+                self.pos = f.tell()
+            for m in _BUF.finditer(chunk):
+                self.ms, self.source = int(m.group(1)), m.group(2) or self.source
+        except OSError:
+            pass
+        return self.ms, self.source
+
+
 def _avg(xs: list[float]) -> float | None:
     xs = [x for x in xs if x is not None]
     return round(sum(xs) / len(xs), 2) if xs else None
@@ -45,6 +86,8 @@ class MetricsService:
         self._gpu: dict | None = None
         self._gpu_ts = 0.0
         self._nvsmi = shutil.which("nvidia-smi")
+        self.obs_log = ObsLogWatch()
+        self._warned_buf: int | None = None
         psutil.cpu_percent(None)
 
     async def gpu(self) -> dict | None:
@@ -93,6 +136,15 @@ class MetricsService:
                                  "connected_since") else None}
         if o.connected:
             s = await o.try_call("GetStats")
+            if not o.simulated:
+                ms, src = self.obs_log.check()
+                d.update(audio_buffering_ms=ms, audio_buffering_source=src)
+                if ms and ms >= 200 and ms != self._warned_buf:
+                    self._warned_buf = ms
+                    self.ctx.bus.notify("warning", f"OBS is delaying its output by {ms} ms (audio buffering"
+                                        f"{', caused by ' + src if src else ''}). TVs see the picture that much later. "
+                                        "Disable that audio source if it isn't needed, then restart OBS: only a "
+                                        "restart lowers it.", "obs")
             if s:
                 d.update(cpu_pct=round(s.get("cpuUsage", 0), 1), mem_mb=round(s.get("memoryUsage", 0)),
                          fps=round(s.get("activeFps", 0), 2), render_ms=round(s.get("averageFrameRenderTime", 0), 2),

@@ -64,7 +64,7 @@ ol.steps>li::before{content:counter(s);position:absolute;left:0;top:2px;width:26
   <a href="#production">6. Switching &amp; layouts</a>
   <a href="#standby">7. Standby &amp; presentations</a>
   <a href="#recording">8. Recording</a>
-  <a href="#tv">9. TV output (wireless &amp; HDMI)</a>
+  <a href="#tv">9. TV output (wireless &amp; HDMI) &amp; live stream</a>
   <a href="#audio">10. Audio</a>
   <a href="#during">11. During the show</a>
   <a href="#problems">12. When something goes wrong</a>
@@ -157,6 +157,12 @@ the production PC can control FestCast.</p></div>
 <tr><td>Not monitored</td><td>OBS isn't running this camera's source yet (only right after start-up).</td></tr>
 </table>
 <p>A dash <b>—</b> means "not measured", never zero. A yellow line under a card explains a problem and what to do.</p>
+<h3>Tally lights on the phones</h3>
+<p>Every camera phone shows a <b style="color:#e5484d">red border "ON AIR · hold steady"</b> while its picture is on
+programme (full-screen or in a layout / picture-in-picture), and a <b style="color:#3fb950">green border "PREVIEW · you
+are next"</b> while it is in preview (Studio Mode). It comes from OBS itself, follows a cut within a moment, and works for
+local and VDO.Ninja cameras (not for "Open VDO.Ninja directly"). No border = not used; grey "Tally not available" = the
+phone can't reach FestCast or OBS is down: tell operators to hold steady when unsure.</p>
 <h3>Camera controls</h3>
 <table>
 <tr><td><span class="b">1080p ▾</span></td><td>Quality target. Changing it needs the operator to re-open their link. The card warns if less is received.</td></tr>
@@ -233,8 +239,22 @@ OBS scene.</p>
   <li>Press <b>Start TV output</b>. The picture arrives within seconds. If you see <span class="b">🔊 Tap for sound</span>, tap once.</li>
 </ol>
 <p>The TV reconnects by itself. If the stream ever stops, FestCast restarts it automatically (even after a FestCast
-crash, the TV keeps playing). <b>Revoke</b> cuts a TV off instantly. Note: while the TV output is on, OBS can't stream
-to YouTube etc. at the same time.</p>
+crash, the TV keeps playing). <b>Revoke</b> cuts a TV off instantly. To stream to YouTube, Twitch etc. as well, use
+<b>Live stream</b> below (not OBS's own Stream button: OBS's stream output is busy feeding the TVs).</p>
+<h3 id="livestream">Live stream (YouTube, Twitch, Facebook, Kick, any RTMP/SRT server)</h3>
+<ol class="steps">
+  <li>Needs ffmpeg once: <code>winget install Gyan.FFmpeg</code>, then restart FestCast.</li>
+  <li><b>Outputs → + Destination</b>: pick the platform and paste its <b>stream key</b> (YouTube Studio → Create → Go
+      live → Stream; Twitch → Settings → Stream). Kick / others: paste the server URL too. Add as many as you like.</li>
+  <li>Press <b>Go live</b>. It starts the TV output if it isn't on: every platform gets the same programme as the TVs.
+      The topbar shows <span class="b">LIVE</span> (amber if a platform is reconnecting).</li>
+  <li>Check the platform's own page (YouTube Studio's preview) before announcing the stream: FestCast can only see
+      the video leaving this PC (<i>Sending</i>), not what the platform does with it.</li>
+  <li>After the show: <b>End live stream</b>.</li>
+</ol>
+<p>The picture goes out exactly as OBS encodes it: set the bitrate in OBS → Settings → Output → Streaming (YouTube
+1080p: 6000-8000 kbps; Twitch: max 6000) and keyframe interval 2 s. Untick a destination to stop just that one. A
+dropped platform reconnects by itself and touches nothing else. Stream keys are never shown again or written to logs.</p>
 <h3>HDMI</h3>
 <ol class="steps">
   <li>Connect the TV/projector to the PC by HDMI (Windows sees a second screen).</li>
@@ -271,13 +291,15 @@ clean "we'll be right back" screen while you fix things. Recording continues.</p
 <table>
 <tr><th>Problem</th><th>Do this</th></tr>
 <tr><td>A camera shows Disconnected</td><td>Ask the operator to unlock the phone and bring the camera page back to the front. Still nothing after a minute: they re-open their link. Then press <b>Reconnect</b>.</td></tr>
-<tr><td>Picture sideways / tall with black bars</td><td>Filming upright on purpose: Production → layout editor → click the camera tile → <b>⟳ Landscape/Portrait</b> turns the tile portrait so the picture fills it (no black bars). Picture lying on its side: same place, <b>Turn picture</b>, or the operator turns Portrait Orientation Lock off and re-opens the link.</td></tr>
+<tr><td>Picture sideways / tall with black bars</td><td>Nothing to do for an upright phone: each camera's picture keeps its own shape and is fitted inside its tile (tall picture = tall in the tile). For a bigger upright picture, make the tile tall: Production → layout editor → click the tile → <b>⟳ Landscape/Portrait</b>. Picture lying on its side: local cameras turn it automatically (the phone asks once for Motion &amp; Orientation: Allow); VDO.Ninja cameras: <b>Turn picture</b>, or the operator turns Portrait Orientation Lock off and re-opens the link.</td></tr>
 <tr><td>Picture blurry / below 1080p</td><td>Phone too far from the router, too hot, or on the front/ultra-wide lens. Move closer or cool it; or set that camera to 720p for a steadier picture.</td></tr>
 <tr><td>Phone link says "invalid"</td><td>It was revoked or expired (48 h). Copy a fresh link from the card.</td></tr>
 <tr><td>Phone can't open the link at all</td><td>Phone not on the same network, or the Wi-Fi blocks devices from seeing each other. Use the production router.</td></tr>
 <tr><td>Top bar says OBS DOWN</td><td>OBS closed or crashed: start OBS again. FestCast reconnects and restores everything by itself.</td></tr>
 <tr><td>FestCast window shows "stopped unexpectedly"</td><td>Nothing: it restarts by itself in 3 s. OBS keeps recording, the TV keeps playing. Reload the dashboard.</td></tr>
 <tr><td>Dashboard says "Dashboard offline"</td><td>Usually the browser lost connection; it reconnects by itself. The show is not affected.</td></tr>
+<tr><td>Live stream says <i>Reconnecting</i></td><td>Read the message under it (<b>Log</b> for details). A wrong
+stream key or a stream not set up on the platform usually shows as an I/O error or "connection refused".</td></tr>
 <tr><td>TV says "Waiting for the programme"</td><td>Press <b>Start TV output</b>. Check the MediaMTX log on the Outputs page.</td></tr>
 <tr><td>TV picture but no sound</td><td>Tap the TV screen once.</td></tr>
 <tr><td>Recording stopped warning</td><td>Check the drive (space, unplugged?) and OBS for an error, then press Start recording again. A new file is made; the old one is kept.</td></tr>
@@ -290,7 +312,7 @@ clean "we'll be right back" screen while you fix things. Recording continues.</p
   <li><b>Return to production</b> or standby for the end card, then stop the recording (Recordings → <b>Stop recording</b>).</li>
   <li>Check History says <b>finished</b> and shows the real video format.</li>
   <li>Optional: <b>Remux → MP4</b> for easier sharing.</li>
-  <li>Outputs → <b>Stop TV output</b> (this also puts OBS's own stream settings back).</li>
+  <li>Outputs → <b>End live stream</b> (if you streamed), then <b>Stop TV output</b> (this also puts OBS's own stream settings back).</li>
   <li>Cameras → <b>Close production</b> when you're done for good (invitations stop working; layouts and recordings are kept).</li>
   <li>Close the FestCast window, then OBS. Copy the recordings somewhere safe.</li>
 </ol>
@@ -330,6 +352,8 @@ clean "we'll be right back" screen while you fix things. Recording continues.</p
 <p><b>While filming</b></p>
 <ul>
   <li><b>Never</b> lock the screen or switch apps: the camera stops.</li>
+  <li><b style="color:#e5484d">Red border = you are ON AIR</b>: hold the shot steady, no reframing.
+      <b style="color:#3fb950">Green border = you are next</b>: get your shot ready now.</li>
   <li>Move smoothly, hold still on the action, keep it level.</li>
   <li>If your picture stops: unlock, bring the browser back, or re-open your link.</li>
   <li>To stop: tap <b>Hang up</b> or close the tab.</li>

@@ -1,7 +1,17 @@
 # FestCast
 
 Live production control for the school festival. FestCast orchestrates; **OBS** renders, records and encodes;
-**VDO.Ninja** carries the phone cameras; **MediaMTX** delivers the programme to TV browsers.
+phones are the cameras (through this PC, or VDO.Ninja); **MediaMTX** delivers the programme to TV browsers and
+YouTube / Twitch / any RTMP server. Camera phones get tally lights (red = on air, green = preview).
+
+Runs on **Windows, Linux and macOS**.
+
+## Download
+
+Get the zip for your system from [Releases](../../releases/latest): `FestCast-<version>-windows.zip`,
+`-linux-x64`, `-linux-arm64`, `-macos-arm64` (Apple silicon) or `-macos-x64` (Intel). Unzip and run `start.bat`
+(Windows), `start.command` (macOS) or `./start.sh` (Linux). Nothing to install except OBS Studio: each zip carries its
+own Python, the built dashboard and MediaMTX. See the `README.txt` inside.
 
 ```
 Phones ──VDO.Ninja (WebRTC)──▶ OBS browser sources ──▶ OBS scenes ──▶ Recording (MKV/NVENC, your drive)
@@ -9,7 +19,7 @@ Phones ──VDO.Ninja (WebRTC)──▶ OBS browser sources ──▶ OBS scene
 FestCast (FastAPI + dashboard) ── OBS WebSocket v5 ──┘   HDMI: OBS fullscreen projector
 ```
 
-## Quick start (Windows)
+## Run from source (Windows)
 
 1. **OBS**: Tools → WebSocket Server Settings → enable, port 4455, authentication on, copy the password.
    Settings → Video: 1920×1080, 30 fps. Settings → Output: Recording encoder NVENC H.264.
@@ -43,6 +53,28 @@ See [docs/SETUP.md](docs/SETUP.md) for details and the hardware rehearsal checkl
 ## Tests
 
 ```
-.venv\Scripts\python -m pytest -q          # 86 backend tests against the mock OBS
+.venv\Scripts\python -m pytest -q          # backend tests against the mock OBS
 cd frontend && npm run typecheck && npm run build
 ```
+
+## Releases
+
+`.github/workflows/release.yml`: push a tag and GitHub builds and publishes everything.
+
+```
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+It runs the tests, builds a self-contained zip on Windows, Linux (x64, arm64) and macOS (arm64, Intel) with
+`packaging/build.py` (python-build-standalone CPython via uv, dependencies, built dashboard, MediaMTX pinned and
+checksum-verified, LICENSE, THIRD-PARTY-NOTICES.txt, README.txt), unzips and starts each one in simulation
+(`packaging/smoke.py`), then creates the GitHub release with all zips and `SHA256SUMS.txt`. A tag with a `-`
+(`v1.3.0-beta.1`) becomes a pre-release. **Actions → Release → Run workflow** builds without publishing (zips are
+kept as workflow artifacts). Local build: `python packaging/build.py --python-dir <uv python install dir>`.
+
+## Licence
+
+FestCast is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
+version. See [LICENSE](LICENSE).

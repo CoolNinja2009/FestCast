@@ -60,6 +60,7 @@ class ProductionService:
             "fps_custom": True, "fps": 30, "reroute_audio": True, "shutdown": False}, STANDBY_SCENE, "standby",
             "standby")
         await obs.fit_full(STANDBY_SCENE, STANDBY_INPUT)
+        await self.ctx.audio.attach(STANDBY_SCENE)
 
     # -- state ---------------------------------------------------------------------------------------
     def started(self) -> bool:

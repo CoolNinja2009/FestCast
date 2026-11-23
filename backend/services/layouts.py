@@ -2,6 +2,7 @@
 ("FC Layout · <name>") using documented scene-item transform requests."""
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..database.models import Layout, new_id
 from ..obs.client import ObsError
+from .audio import BUS_SCENE
 from .cameras import cam_input_name
 
 if TYPE_CHECKING:
@@ -63,6 +65,8 @@ def clean_element(e: dict) -> dict:
     }
     if t == "camera":
         out["camera_id"] = str(e.get("camera_id") or "")[:32]
+        if turned_crop(out["crop"]):            # old Landscape/Portrait crop: not needed any more
+            out["crop"] = {"l": 0.0, "t": 0.0, "r": 0.0, "b": 0.0}
     if t == "text":
         out.update(text=str(e.get("text") or "Text")[:500], font=str(e.get("font") or "Arial")[:60],
                    size=int(f("size", 64, 8, 400)), color=str(e.get("color") or "#ffffff")[:9],
@@ -74,10 +78,73 @@ def clean_element(e: dict) -> dict:
     return out
 
 
+def arrange(aspects: list[float], W: float, H: float) -> list[tuple[float, float, float, float]]:
+    """Auto arrange: place pictures of these aspects (in order) on a W x H canvas as large as possible, in rows
+    (each row as tall as its pictures allow side by side), centred. Tries every row count and keeps the one that
+    covers the most screen. Returns normalised (x, y, w, h) per picture."""
+    n = len(aspects)
+    if not n:
+        return []
+    best: tuple[float, list] | None = None
+    for rows in range(1, n + 1):
+        base, extra = divmod(n, rows)
+        sizes = [base + (1 if i < extra else 0) for i in range(rows)]
+        if 0 in sizes:
+            continue
+        groups, i = [], 0
+        for k in sizes:
+            groups.append(aspects[i:i + k]); i += k
+        heights = [W / sum(g) for g in groups]               # each row fills the width
+        k = min(1.0, H / sum(heights))                        # then shrink everything to fit the height
+        area = sum(a * (h * k) ** 2 for g, h in zip(groups, heights) for a in g)
+        if best is None or area > best[0] * 1.001:
+            boxes, y = [], (H - sum(heights) * k) / 2
+            for g, h in zip(groups, heights):
+                h *= k
+                x = (W - sum(g) * h) / 2
+                for a in g:
+                    boxes.append((x / W, y / H, a * h / W, h / H)); x += a * h
+                y += h
+            best = (area, boxes)
+    return best[1]
+
+
+def turned_crop(c: dict) -> bool:
+    """The crop older versions of the editor's Landscape/Portrait button put on a portrait tile (the 9:16 middle of
+    a 16:9 source). Camera sources now have the picture's own shape, so this crop is ignored."""
+    return abs(c["l"] - 0.35) < 0.003 and abs(c["r"] - 0.35) < 0.003 and abs(c["t"] - c["b"]) < 0.003 and c["t"] < 0.05
+
+
 class LayoutService:
     def __init__(self, ctx: "Ctx") -> None:
         self.ctx = ctx
         self.sync_state: dict[str, dict] = {}
+        self._resync: set[str] = set()
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def camera_changed_shape(self, cid: str) -> None:
+        """A camera turned (portrait <-> landscape) or its rotation/frame changed: reshape its OBS source and re-apply
+        the layouts that show it, once things settle (a phone being turned reports a few sizes in a row)."""
+        if cid in self._resync:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._resync.add(cid)
+
+        async def later() -> None:
+            await asyncio.sleep(1.5)
+            self._resync.discard(cid)
+            try:
+                await self.ctx.cameras.apply_held(cid)          # phone held sideways + tall frames: turn it
+                await self.ctx.cameras.sync_camera_obs(cid)     # the source takes the new shape
+            except KeyError:
+                return
+            for l in self.all():
+                if any(e.get("type") == "camera" and e.get("camera_id") == cid for e in l.elements):
+                    await self.sync(l.id)
+        loop.create_task(later())
 
     def all(self) -> list[Layout]:
         with self.ctx.db.session() as s:
@@ -90,8 +157,38 @@ class LayoutService:
                 raise KeyError(lid)
             return l
 
+    def auto_arrange(self, lid: str) -> bool:
+        return bool(self.ctx.db.get(f"layout_auto:{lid}"))
+
+    def _arranged(self, l: Layout, W: int, H: int) -> list[dict]:
+        """With auto arrange on, the camera tiles' boxes come from the pictures' real shapes (unknown = canvas
+        shape); the result is saved so the editor shows exactly what OBS gets."""
+        els = l.elements
+        if not self.auto_arrange(l.id):
+            return els
+        cams = sorted((e for e in els if e["type"] == "camera" and not e["hidden"]),
+                      key=lambda e: (round(e["y"], 2), e["x"]))
+        aspects = []
+        for e in cams:
+            try:
+                sw, sh = self.ctx.cameras.source_size(self.ctx.cameras.camera(e.get("camera_id") or ""))
+            except KeyError:
+                sw, sh = W, H
+            aspects.append(sw / sh)
+        boxes = arrange(aspects, W, H)
+        new = copy.deepcopy(els)
+        byid = {e["id"]: e for e in new}
+        for e, (x, y, w, h) in zip(cams, boxes):
+            byid[e["id"]].update(x=round(x, 4), y=round(y, 4), w=round(w, 4), h=round(h, 4),
+                                 crop={"l": 0.0, "t": 0.0, "r": 0.0, "b": 0.0}, fit="fit")
+        if new != els:
+            with self.ctx.db.session() as s:
+                s.get(Layout, l.id).elements = new
+        return new
+
     def view(self, l: Layout) -> dict:
         return {"id": l.id, "name": l.name, "elements": l.elements, "obs_scene": layout_scene(l.name),
+                "auto_arrange": self.auto_arrange(l.id),
                 "updated_at": l.updated_at.isoformat() if l.updated_at else None,
                 "sync": self.sync_state.get(l.id, {"state": "unsynced"}),
                 "live": self.ctx.obs.state.get("program_scene") == layout_scene(l.name)}
@@ -114,8 +211,10 @@ class LayoutService:
         return l
 
     async def update(self, lid: str, name: str | None = None, elements: list[dict] | None = None,
-                     sync: bool = True) -> Layout:
+                     sync: bool = True, auto_arrange: bool | None = None) -> Layout:
         old = self.get(lid)
+        if auto_arrange is not None:
+            self.ctx.db.set(f"layout_auto:{lid}", bool(auto_arrange))
         with self.ctx.db.session() as s:
             l = s.get(Layout, lid)
             if name is not None and name.strip() and name.strip() != l.name:
@@ -134,6 +233,7 @@ class LayoutService:
             await self.ctx.obs.rename_scene(layout_scene(old.name), layout_scene(l.name))
         if sync:
             await self.sync(lid)
+            l = self.get(lid)                  # auto arrange may have placed the camera tiles
         self.publish()
         return l
 
@@ -208,6 +308,8 @@ class LayoutService:
         t: dict[str, Any] = {"positionX": e["x"] * W, "positionY": e["y"] * H, "alignment": 5, "rotation": 0.0}
         if e["type"] in ("camera", "image"):
             c = e["crop"]
+            if e["type"] == "camera" and turned_crop(c):
+                c = {"l": 0, "t": 0, "r": 0, "b": 0}
             t.update(boundsType="OBS_BOUNDS_STRETCH" if e["fit"] == "stretch" else "OBS_BOUNDS_SCALE_INNER",
                      boundsAlignment=0, boundsWidth=max(1.0, e["w"] * W), boundsHeight=max(1.0, e["h"] * H),
                      cropLeft=int(c["l"] * src_w), cropRight=int(c["r"] * src_w),
@@ -218,6 +320,10 @@ class LayoutService:
         return t
 
     async def sync(self, lid: str) -> dict:
+        async with self._locks.setdefault(lid, asyncio.Lock()):
+            return await self._sync(lid)
+
+    async def _sync(self, lid: str) -> dict:
         obs = self.ctx.obs
         if not obs.connected:
             self.sync_state[lid] = {"state": "pending", "error": "OBS not connected - will sync on reconnect"}
@@ -231,7 +337,7 @@ class LayoutService:
             await obs.ensure_scene(scene, "layout", lid)
             cams = {c.id for c in self.ctx.cameras.cameras()}
             desired: list[tuple[dict, str]] = []
-            for e in sorted(l.elements, key=lambda e: e["z"]):
+            for e in sorted(self._arranged(l, W, H), key=lambda e: e["z"]):
                 if e["type"] == "camera":
                     if e.get("camera_id") not in cams:
                         errors.append(f"'{e['name']}' has no camera assigned")
@@ -248,7 +354,7 @@ class LayoutService:
             want = {src for _, src in desired}
             # remove stale items (scene is FestCast-owned) and graphics no longer used by this layout
             for it in await obs.items(scene):
-                if it["sourceName"] not in want:
+                if it["sourceName"] not in want and it["sourceName"] != BUS_SCENE:
                     await obs.call("RemoveSceneItem", {"sceneName": scene, "sceneItemId": it["sceneItemId"]})
             for row in obs.owned_by_ref(lid, "graphic"):
                 if row.name not in want:
@@ -260,9 +366,7 @@ class LayoutService:
                     iid = await obs.add_item(scene, src, enabled=not e["hidden"])
                 sw, sh = (1920, 1080)
                 if e["type"] == "camera":
-                    p = self.ctx.cameras.production()
-                    if p:
-                        sw, sh = p.canvas_w, p.canvas_h
+                    sw, sh = self.ctx.cameras.source_size(self.ctx.cameras.camera(e["camera_id"]))
                 await obs.call("SetSceneItemTransform", {"sceneName": scene, "sceneItemId": iid,
                                                          "sceneItemTransform": self._transform(e, W, H, sw, sh)})
                 await obs.call("SetSceneItemEnabled", {"sceneName": scene, "sceneItemId": iid,
@@ -270,6 +374,7 @@ class LayoutService:
                 await obs.call("SetSceneItemLocked", {"sceneName": scene, "sceneItemId": iid,
                                                       "sceneItemLocked": e["locked"]})
                 await obs.call("SetSceneItemIndex", {"sceneName": scene, "sceneItemId": iid, "sceneItemIndex": idx})
+            await self.ctx.audio.attach(scene)
             self.sync_state[lid] = {"state": "warning" if errors else "synced", "error": "; ".join(errors) or None}
         except ObsError as e:
             log.warning("layout sync failed: %s", e)
@@ -279,6 +384,11 @@ class LayoutService:
         return self.sync_state[lid]
 
     async def sync_all(self) -> None:
+        with self.ctx.db.session() as s:          # tidy layouts saved with the old Landscape/Portrait crop
+            for l in s.query(Layout):
+                if any(e.get("type") == "camera" and turned_crop(e.get("crop") or {"l": 0, "t": 0, "r": 0, "b": 0})
+                       for e in l.elements):
+                    l.elements = [clean_element(e) for e in l.elements]
         for l in self.all():
             await self.sync(l.id)
 

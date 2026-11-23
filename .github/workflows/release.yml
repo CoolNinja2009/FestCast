@@ -1,0 +1,119 @@
+# Builds self-contained FestCast packages for Windows, Linux and macOS and publishes them as a GitHub release.
+#   Release:   git tag v1.2.3 && git push origin v1.2.3     -> tests, 5 builds, release "FestCast 1.2.3" with all zips
+#   Try build: Actions > Release > Run workflow             -> same builds, zips kept as workflow artifacts only
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Typecheck dashboard
+        working-directory: frontend
+        run: npm ci --no-fund --no-audit && npm run typecheck
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest,   target: windows }
+          - { os: ubuntu-22.04,     target: linux-x64 }     # older glibc = runs on more distros
+          - { os: ubuntu-22.04-arm, target: linux-arm64 }   # Raspberry Pi 5, ARM servers
+          - { os: macos-14,         target: macos-arm64 }   # Apple silicon
+          - { os: macos-15-intel,   target: macos-x64 }     # Intel Macs
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build dashboard
+        working-directory: frontend
+        run: npm ci --no-fund --no-audit && npm run build
+
+      - uses: actions/setup-python@v5          # runs the build script only; the package gets its own Python
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v6
+      - name: Fetch standalone CPython (python-build-standalone)
+        shell: bash
+        run: |
+          echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/standalone-python" >> "$GITHUB_ENV"
+          UV_PYTHON_INSTALL_DIR="$RUNNER_TEMP/standalone-python" uv python install "$PYTHON_VERSION"
+
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev.${GITHUB_SHA::7}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        shell: bash
+        run: python packaging/build.py --python-dir "$UV_PYTHON_INSTALL_DIR" --version "${{ steps.v.outputs.version }}"
+
+      - name: Smoke test the zip (unzips it, starts FestCast in simulation, checks dashboard + MediaMTX)
+        shell: bash
+        run: python packaging/smoke.py dist/FestCast-*-${{ matrix.target }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FestCast-${{ matrix.target }}
+          path: dist/FestCast-*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum FestCast-*.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          pre=""; [[ "$v" == *-* ]] && pre="--prerelease"
+          gh release create "$GITHUB_REF_NAME" dist/FestCast-*.zip dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --title "FestCast $v" --generate-notes $pre

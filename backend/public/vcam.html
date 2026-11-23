@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex"><title>FestCast camera</title>
+<style>
+html,body{margin:0;height:100%;background:#000;color:#e8eaed;font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+iframe{position:fixed;inset:0;width:100%;height:100%;border:0;background:#000}
+#tilt{position:fixed;right:10px;top:max(10px,env(safe-area-inset-top));z-index:2;padding:8px 12px;border:0;border-radius:999px;
+  background:#e5484dee;color:#fff;font-weight:700;font-size:13px}
+#tilt.ok{background:#2a2f37cc;font-weight:500}
+#tally{position:fixed;inset:0;z-index:5;pointer-events:none;border:0 solid transparent;transition:border-color .12s}
+#tally.program{border:14px solid #e5484d}#tally.preview{border:14px solid #3fb950}
+#tally span{position:absolute;left:50%;top:calc(max(10px,env(safe-area-inset-top)) + 50px);transform:translateX(-50%);padding:6px 14px;border-radius:999px;font:800 15px/1 system-ui,sans-serif;letter-spacing:.06em;white-space:nowrap;display:none}
+#tally.program span{display:block;background:#e5484d;color:#fff}#tally.preview span{display:block;background:#3fb950;color:#04140a}
+#tally.unknown span{display:block;background:#2a2f37cc;color:#9aa0a8;font-weight:600;font-size:12px;letter-spacing:0}
+#direct{position:fixed;left:10px;top:max(10px,env(safe-area-inset-top));z-index:2;padding:8px 12px;border-radius:999px;
+  background:#2a2f37cc;color:#cfd3d8;font-size:12px;text-decoration:none}
+</style></head><body>
+<a id="direct" href="#">Open VDO.Ninja directly</a>
+<button id="tilt">Tap: auto-turn picture</button>
+<script>
+// VDO.Ninja camera inside a FestCast page: the VDO.Ninja camera page runs in the frame (it sends the video as
+// before), and this page reads the phone's motion sensor so FestCast can turn a picture that arrives lying on its
+// side (iPhone with Portrait Orientation Lock on). Same rules as the local camera page (cam.html).
+const token = location.pathname.split('/').pop();
+const base = '/api/public/cam/' + encodeURIComponent(token);
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let gSign = IOS ? -1 : 1, gx = 0, gy = 0, motionOk = false, sentRot = null, rotTimer = null;
+const tilt = document.getElementById('tilt');
+
+fetch('/api/public/join/' + encodeURIComponent(token), {cache: 'no-store'}).then(r => r.json()).then(j => {
+  if (!j.publish_url) { document.body.textContent = j.detail || 'This camera link is not valid.'; return; }
+  document.getElementById('direct').href = j.publish_url;
+  const f = document.createElement('iframe');
+  f.allow = 'camera *; microphone *; autoplay; fullscreen; display-capture; screen-wake-lock';
+  f.src = j.publish_url;
+  document.body.prepend(f);
+}).catch(() => { document.body.textContent = 'Cannot reach FestCast. Make sure you are on the festival Wi-Fi, then reload.'; });
+
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
+  motionOk = true;
+  gx = gx * 0.8 + a.x * 0.2; gy = gy * 0.8 + a.y * 0.2;
+  if (Math.abs(gy) > 7 && Math.abs(gx) < 3) gSign = gy > 0 ? 1 : -1;
+}
+function held() {
+  if (!motionOk) return null;
+  const x = gx * gSign, y = gy * gSign;
+  if (Math.abs(x) < 6 || Math.abs(x) < Math.abs(y) * 1.5) return 0;
+  return x < 0 ? 90 : 270;          // VDO.Ninja sends the rear camera (facing=rear)
+}
+setInterval(() => {
+  const r = held();
+  if (r === null || r === sentRot) return;
+  clearTimeout(rotTimer);
+  rotTimer = setTimeout(() => {
+    if (held() !== r) return;
+    fetch(base + '/orientation', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({held: r})})
+      .then(res => { if (res.ok) { sentRot = r; tilt.textContent = r ? `Sideways · auto-turn on` : 'Upright · auto-turn on'; } }).catch(() => {});
+  }, 1200);
+}, 700);
+async function startMotion() {
+  try {
+    if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
+      if (await DeviceMotionEvent.requestPermission() !== 'granted') { tilt.textContent = 'Auto-turn blocked (motion access)'; return; }
+    }
+    window.addEventListener('devicemotion', onMotion);
+    tilt.className = 'ok'; tilt.textContent = 'Auto-turn on';
+  } catch (e) { tilt.textContent = 'Auto-turn not available'; }
+}
+tilt.onclick = startMotion;
+// Android needs no permission: start straight away
+if (!(typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission)) startMotion();
+// Tally light: red border = this camera is ON AIR (hold the shot steady), green = in PREVIEW (next up). FestCast
+// reads it from OBS and answers this long-poll the moment it changes. Unknown (no FestCast / OBS link) shows no colour.
+(function () {
+  const el = document.createElement('div'), lab = document.createElement('span');
+  el.id = 'tally'; el.append(lab); document.body.append(el);
+  const TEXT = {program: '● ON AIR · hold steady', preview: 'PREVIEW · you are next', unknown: 'Tally not available', off: ''};
+  const set = t => { if (el.className !== t) { el.className = t; lab.textContent = TEXT[t] || ''; } };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let v = -1;
+  (async () => {
+    for (;;) {
+      try {
+        const r = await fetch(base + '/tally?v=' + v, {cache: 'no-store'});
+        if (!r.ok) { set('unknown'); v = -1; await sleep(r.status === 404 ? 15000 : 3000); continue; }
+        const j = await r.json(); v = j.v; set(j.tally in TEXT ? j.tally : 'unknown');
+      } catch (e) { set('unknown'); v = -1; await sleep(2000); }
+    }
+  })();
+})();
+</script></body></html>

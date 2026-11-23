@@ -114,7 +114,8 @@ class MockObsTransport:
     def r_GetVersion(self, d): return {"obsVersion": "SIMULATED", "obsWebSocketVersion": "5.x-mock", "rpcVersion": 1,
                                        "platformDescription": "simulation", "availableRequests": []}
     def r_GetInputKindList(self, d): return {"inputKinds": ["browser_source", "image_source", "color_source_v3",
-                                                            "text_gdiplus_v3", "ffmpeg_source"]}
+                                                            "text_gdiplus_v3", "ffmpeg_source", "wasapi_input_capture",
+                                                            "wasapi_output_capture"]}
     def r_GetVideoSettings(self, d): return {"baseWidth": 1920, "baseHeight": 1080, "outputWidth": 1920,
                                              "outputHeight": 1080, "fpsNumerator": 30, "fpsDenominator": 1}
     def r_GetStats(self, d): return {"cpuUsage": 3.1, "memoryUsage": 512.0, "activeFps": 30.0,
@@ -219,6 +220,40 @@ class MockObsTransport:
     def r_SetInputAudioSyncOffset(self, d): self._inp(d)["sync"] = d["inputAudioSyncOffset"]
     def r_GetInputAudioMonitorType(self, d): return {"monitorType": self._inp(d)["monitor"]}
     def r_SetInputAudioMonitorType(self, d): self._inp(d)["monitor"] = d["monitorType"]
+    # new OBS inputs are on all six tracks
+    def r_GetInputAudioTracks(self, d):
+        return {"inputAudioTracks": dict(self._inp(d).setdefault("tracks", {str(t): True for t in range(1, 7)}))}
+    def r_SetInputAudioTracks(self, d):
+        self._inp(d).setdefault("tracks", {str(t): True for t in range(1, 7)}).update(d["inputAudioTracks"])
+
+    SIM_DEVICES = [("Default", "default"), ("Microphone (Simulated USB Audio)", "{sim-mic}"),
+                   ("Line In (Simulated Realtek Audio)", "{sim-line}")]
+
+    def r_GetInputPropertiesListPropertyItems(self, d):
+        inp = self._inp(d)
+        if inp["kind"] != "wasapi_input_capture" or d["propertyName"] != "device_id":
+            raise ObsError("GetInputPropertiesListPropertyItems", 600, "property not found (mock)")
+        return {"propertyItems": [{"itemName": n, "itemEnabled": True, "itemValue": v} for n, v in self.SIM_DEVICES]}
+
+    # filters (sources = inputs here)
+    def _filters(self, d) -> list:
+        return self._inp({"inputName": d["sourceName"]}).setdefault("filters", [])
+
+    def _filter(self, d) -> dict:
+        for f in self._filters(d):
+            if f["filterName"] == d["filterName"]:
+                return f
+        raise ObsError("filter", 600, "filter not found")
+
+    def r_GetSourceFilterList(self, d): return {"filters": [dict(f) for f in self._filters(d)]}
+    def r_CreateSourceFilter(self, d):
+        fl = self._filters(d)
+        if any(f["filterName"] == d["filterName"] for f in fl):
+            raise ObsError("CreateSourceFilter", 601, "exists")
+        fl.append({"filterName": d["filterName"], "filterKind": d["filterKind"], "filterIndex": len(fl),
+                   "filterEnabled": True, "filterSettings": dict(d.get("filterSettings", {}))})
+    def r_SetSourceFilterSettings(self, d): self._filter(d)["filterSettings"].update(d["filterSettings"])
+    def r_SetSourceFilterEnabled(self, d): self._filter(d)["filterEnabled"] = d["filterEnabled"]
 
     def _inp(self, d) -> dict:
         n = d.get("inputName")
@@ -229,7 +264,10 @@ class MockObsTransport:
     # scene items
     def r_GetSceneItemList(self, d):
         items = self._scene(d)["items"]
-        return {"sceneItems": [dict(i, sceneItemIndex=n) for n, i in enumerate(items)]}
+        scenes = {s["sceneName"] for s in self.scenes}
+        return {"sceneItems": [dict(i, sceneItemIndex=n, isGroup=False, sourceType="OBS_SOURCE_TYPE_SCENE"
+                                    if i["sourceName"] in scenes else "OBS_SOURCE_TYPE_INPUT")
+                               for n, i in enumerate(items)]}
 
     def r_CreateSceneItem(self, d):
         src = d["sourceName"]
@@ -246,7 +284,11 @@ class MockObsTransport:
         s["items"].remove(self._item(d))
 
     def r_SetSceneItemTransform(self, d): self._item(d)["sceneItemTransform"].update(d["sceneItemTransform"])
-    def r_SetSceneItemEnabled(self, d): self._item(d)["sceneItemEnabled"] = d["sceneItemEnabled"]
+    async def r_SetSceneItemEnabled(self, d):
+        self._item(d)["sceneItemEnabled"] = d["sceneItemEnabled"]
+        await self._emit("SceneItemEnableStateChanged", {"sceneName": d.get("sceneName"),
+                                                         "sceneItemId": d["sceneItemId"],
+                                                         "sceneItemEnabled": d["sceneItemEnabled"]})
     def r_SetSceneItemLocked(self, d): self._item(d)["sceneItemLocked"] = d["sceneItemLocked"]
 
     def r_SetSceneItemIndex(self, d):

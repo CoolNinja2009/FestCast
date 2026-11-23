@@ -2,6 +2,40 @@ import { act, api, clear, confirmBox, h, live, modal, store, toast } from '../li
 
 let openId: string | null = null;
 
+const control = (action: string, index?: number) => act(() => api('POST', '/api/presentations/control', { action, index }));
+
+/** Manual slide control for the standby presentation: Prev / Next / Hold-Auto and the slide on air.
+ * Plain render: the region that uses it must listen to the 'presentations' topic. */
+export function slideControls(): HTMLElement {
+  return h('div.row.wrap', null, ...(() => {
+    const s = store.get('presentations') || {};
+    const pl = s.player || {}, act_ = (s.items || []).find((x: any) => x.id === s.active);
+    if (!act_) return [h('span.small.dim', null, 'No standby presentation: standby shows the branded card.')];
+    if (!pl.count) return [h('span.small.dim', null, `${act_.name}: no enabled slides.`)];
+    return [
+      h('button.btn', { title: 'Previous slide (Page Up)', onclick: () => control('prev') }, '◀ Prev'),
+      h('button.btn.primary', { title: 'Next slide (Page Down, or a presentation clicker)', onclick: () => control('next') }, 'Next ▶'),
+      h('button.btn', { class: pl.paused ? 'on' : '', title: pl.paused ? 'Slides stay until you press Next. Click to advance on their timers again.' : 'Stop the slide timers and move the slides by hand',
+        onclick: () => control(pl.paused ? 'play' : 'pause') }, pl.paused ? '▶ Auto' : '⏸ Hold'),
+      h('span.small', null, h('b', null, act_.name), ` · slide ${pl.pos != null ? pl.pos + 1 : '–'} / ${pl.count}`,
+        h('span.dim', null, pl.paused ? ' · held (manual)' : ' · auto')),
+    ];
+  })());
+}
+
+// Page Down / Page Up (what presentation clickers send) move the standby slides from the Production and
+// Presentations pages, unless you are typing.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'PageDown' && e.key !== 'PageUp') return;
+  if (!/^#\/(production|presentations)/.test(location.hash)) return;
+  const t = e.target as HTMLElement;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  const s = store.get('presentations') || {};
+  if (!s.active || !(s.player || {}).count) return;
+  e.preventDefault();
+  control(e.key === 'PageDown' ? 'next' : 'prev');
+});
+
 async function remove(p: any) {
   const text = `Delete “${p.name}” and its ${p.slides.length} slide(s)? This can’t be undone.` +
     (p.active ? ' It is the standby presentation: standby will show the branded card instead.' : '');
@@ -45,8 +79,10 @@ function editor(p: any) {
   let dragIdx = -1;
   const save = (patch: any) => act(() => api('PATCH', `/api/presentations/${p.id}`, patch));
   const saveSlides = () => save({ slides: slides.map((s: any) => ({ file: s.file, enabled: s.enabled, duration: s.duration })) });
+  const pl = (store.get('presentations') || {}).player || {};
   const draw = () => clear(grid, slides.map((s: any, i: number) => {
-    const d = h('div.slide', { class: s.enabled ? '' : 'off', draggable: 'true',
+    const on = p.active && s.enabled ? slides.slice(0, i).filter((x: any) => x.enabled).length : -1;
+    const d = h('div.slide', { class: (s.enabled ? '' : 'off') + (on >= 0 && on === pl.pos ? ' cur' : ''), draggable: 'true',
       ondragstart: () => { dragIdx = i; d.classList.add('drag'); },
       ondragend: () => d.classList.remove('drag'),
       ondragover: (e: DragEvent) => { e.preventDefault(); d.classList.add('over'); },
@@ -57,6 +93,7 @@ function editor(p: any) {
         h('label.c.tiny', { title: 'Include in the loop' }, h('input', { type: 'checkbox', checked: s.enabled, onchange: (e: any) => { s.enabled = e.target.checked; draw(); saveSlides(); } })),
         h('input', { type: 'number', placeholder: `${p.default_duration}s`, value: s.duration ?? '', min: '1', title: 'Seconds (empty = default)', style: { width: '64px', height: '26px' },
           onchange: (e: any) => { s.duration = e.target.value ? Number(e.target.value) : null; saveSlides(); } }),
+        on >= 0 ? h('button.btn.sm', { title: 'Put this slide on the standby screen now', onclick: () => control('goto', on) }, 'Show') : null,
         h('button.btn.sm.ghost.right', { title: 'Remove slide', onclick: () => { slides.splice(i, 1); draw(); saveSlides(); } }, '✕')));
     return d;
   }));
@@ -70,6 +107,7 @@ function editor(p: any) {
           : h('button.btn.sm.green', { onclick: () => act(() => api('POST', `/api/presentations/${p.id}/activate`), 'Set as standby presentation') }, 'Use for standby'),
         h('button.btn.sm.ghost.danger', { onclick: () => remove(p) }, 'Delete'))),
     h('div.pb.col', null,
+      p.active ? slideControls() : null,
       h('div.form', null,
         h('label.f', null, 'Name', h('input', { type: 'text', value: p.name, onchange: (e: any) => save({ name: e.target.value }) })),
         h('label.f', null, 'Default duration (s)', h('input', { type: 'number', value: String(p.default_duration), min: '1', onchange: (e: any) => save({ default_duration: Number(e.target.value) }) })),

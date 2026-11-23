@@ -24,17 +24,20 @@ fetch('/api/public/join/' + encodeURIComponent(token), {cache: 'no-store'}).then
   const j = await r.json();
   if (!r.ok) { el.innerHTML = `<h1>Link not valid</h1><p class="err">${esc(j.detail || 'Error')}</p>`; return; }
   const local = j.transport === 'local';
-  const target = local ? (j.https_port ? `https://${location.hostname}:${j.https_port}/cam/${encodeURIComponent(token)}` : null) : j.publish_url;
+  // local: FestCast's https camera page by the PC's IP (iPhones won't open https on the .local name)
+  const target = local ? (j.https_port ? j.publish_url : null) : (j.wrap_url || j.publish_url);
   const steps = local ? `
       <li>Use <b>Chrome</b> (Android) or <b>Safari</b> (iPhone). Stay on the festival Wi-Fi.</li>
       <li>Hold the phone <b>sideways (landscape)</b>. <b>iPhone:</b> turn <b>Portrait Orientation Lock off</b> in Control Center first. (Android: turn Auto-rotate on.)</li>
       <li>Plug into a power bank and keep this page in front: phones pause the camera when the screen locks or you switch apps.</li>
       <li><b>Security warning, first time only:</b> the next page is FestCast on this network, with its own certificate. Chrome: tap <b>Advanced</b> → <b>Proceed</b>. Safari: tap <b>Show Details</b> → <b>visit this website</b>.</li>
-      <li>Allow the camera, check the picture, press <b>Start</b>. Leave the mic off unless the producer asked for it.</li>` : `
+      <li>Allow the camera, check the picture, press <b>Start</b>. Leave the mic off unless the producer asked for it.</li>
+      <li>Need a wider shot? <b>Lens</b> switches to the ultra-wide (0.5×); the slider zooms within a lens.</li>` : `
       <li>Use <b>Safari</b> (iPhone) or <b>Chrome</b> (Android). Stay on the festival Wi-Fi.</li>
       <li>Hold the phone <b>sideways (landscape)</b>. <b>iPhone:</b> open Control Center and turn <b>Portrait Orientation Lock off</b> first, otherwise the picture arrives sideways. (Android: turn Auto-rotate on.)</li>
       <li>Plug into a power bank, turn <b>auto-lock / screen timeout off</b>, and keep this page in front: phones pause the camera when the screen locks or you switch apps.</li>
-      <li>On the next page: allow camera access, choose the <b>rear camera</b> (you can switch there), check the preview, then press <b>Start</b>.</li>
+      ${j.wrap_url ? '<li><b>Security warning, first time only:</b> Safari: <b>Show Details</b> → <b>visit this website</b>; Chrome: <b>Advanced</b> → <b>Proceed</b>. Then tap the red <b>auto-turn</b> button (top right) and allow Motion &amp; Orientation.</li>' : ''}
+      <li>On the next page: allow camera access, choose the <b>rear camera</b> (you can switch there), check the preview, then press <b>Start</b>. For a wider shot (0.5×), pick <b>Back Ultra Wide Camera</b> in that camera list: pinch-zoom can only zoom in.</li>
       <li>Microphone: only choose one if the producer asked you to; otherwise pick "no audio".</li>`;
   el.innerHTML = `
     <h1>${esc(j.camera)}</h1><p class="sub">${esc(j.production)} · camera slot ${j.slot}</p>

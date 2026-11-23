@@ -8,7 +8,8 @@ video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;backgroun
 #top{position:fixed;left:0;right:0;top:0;padding:max(10px,env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:10px;background:linear-gradient(#000c,#0000)}
 #name{font-weight:700;font-size:17px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #badge{padding:5px 11px;border-radius:999px;font-weight:700;font-size:13px;background:#333}
-#badge.live{background:var(--accent)}#badge.wait{background:var(--warn);color:#000}
+#badge.live{background:var(--accent)}
+#tilt{flex:none;padding:6px 10px;font-size:13px;border-radius:999px;background:var(--warn);color:#000}#tilt.ok{background:#2a2f37;color:#cfd3d8}#badge.wait{background:var(--warn);color:#000}
 #stats{position:fixed;left:14px;top:calc(max(10px,env(safe-area-inset-top)) + 40px);font:12px ui-monospace,monospace;color:#cfd3d8;background:#0008;padding:4px 8px;border-radius:6px}
 #bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px max(14px,env(safe-area-inset-bottom));display:flex;gap:10px;background:linear-gradient(#0000,#000c)}
 button{flex:1;padding:16px 10px;font-size:17px;font-weight:650;border:0;border-radius:12px;background:#2a2f37;color:#fff}
@@ -16,13 +17,22 @@ button.go{background:var(--accent)}button:disabled{opacity:.45}
 #msg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(92vw,520px);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
 #msg h1{font-size:22px;margin:0 0 8px}#msg p{margin:6px 0;color:var(--dim)}#msg.hide{display:none}
 #msg b{color:var(--text)}.err{color:#ff8a8a!important}
+#zoom{position:fixed;left:14px;right:14px;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 74px);display:flex;align-items:center;gap:10px;background:#0009;padding:8px 12px;border-radius:12px}
+#tally{position:fixed;inset:0;z-index:5;pointer-events:none;border:0 solid transparent;transition:border-color .12s}
+#tally.program{border:14px solid #e5484d}#tally.preview{border:14px solid #3fb950}
+#tally span{position:absolute;left:50%;top:calc(max(10px,env(safe-area-inset-top)) + 50px);transform:translateX(-50%);padding:6px 14px;border-radius:999px;font:800 15px/1 system-ui,sans-serif;letter-spacing:.06em;white-space:nowrap;display:none}
+#tally.program span{display:block;background:#e5484d;color:#fff}#tally.preview span{display:block;background:#3fb950;color:#04140a}
+#tally.unknown span{display:block;background:#2a2f37cc;color:#9aa0a8;font-weight:600;font-size:12px;letter-spacing:0}
+#zoom input{flex:1;accent-color:var(--accent)}#zoom span{font:600 14px ui-monospace,monospace;min-width:48px;text-align:right}
 </style></head><body>
 <video id="v" autoplay playsinline muted></video>
-<div id="top"><span id="name">FestCast camera</span><span id="badge">OFF</span></div>
+<div id="top"><span id="name">FestCast camera</span><button id="tilt" title="Turn the picture automatically when the phone is held sideways">⟲ Auto-turn</button><span id="badge">OFF</span></div>
 <div id="stats" hidden></div>
 <div id="msg"><h1>Loading…</h1></div>
+<div id="zoom" hidden><input id="zr" type="range"><span id="zv">1.0×</span></div>
 <div id="bar" hidden>
   <button id="flip">Switch camera</button>
+  <button id="lens" hidden>Lens</button>
   <button id="mic">Mic: off</button>
   <button id="go" class="go">Start</button>
 </div>
@@ -34,7 +44,7 @@ const base = '/api/public/cam/' + encodeURIComponent(token);
 const $ = id => document.getElementById(id);
 const v = $('v'), msg = $('msg'), badge = $('badge');
 let info = null, stream = null, pc = null, session = null, want = false, retry = null, facing = 'environment';
-let micOn = false, wake = null, reloadSeen = null, lastOut = null, statsTimer = null;
+let micOn = false, wake = null, reloadSeen = null, lastOut = null, statsTimer = null, deviceId = null;
 
 function show(title, text, err) {
   msg.innerHTML = `<h1>${title}</h1>` + (text ? `<p class="${err ? 'err' : ''}">${text}</p>` : '');
@@ -46,11 +56,52 @@ function setBadge(t, cls) { badge.textContent = t; badge.className = cls || ''; 
 async function getCamera() {
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = await navigator.mediaDevices.getUserMedia({
-    video: {facingMode: {ideal: facing}, width: {ideal: info.width}, height: {ideal: info.height},
+    video: {...(deviceId ? {deviceId: {exact: deviceId}} : {facingMode: {ideal: facing}}), width: {ideal: info.width}, height: {ideal: info.height},
             frameRate: {ideal: info.fps, max: info.fps}},
     audio: micOn ? {echoCancellation: false, noiseSuppression: false, autoGainControl: false} : false});
   v.srcObject = stream;
   stream.getVideoTracks()[0].addEventListener('ended', () => { if (want) restart('camera stopped'); });
+  setupZoom(); lensList();
+}
+
+// Zoom and lens. Zooming out past 1x (0.5x on an iPhone) is a different lens, the ultra-wide, which the browser lists
+// as its own camera ("Back Ultra Wide Camera"), so "Lens" steps through the phone's cameras on the same side.
+// Within a lens, the slider uses the camera's own zoom where the browser offers it.
+function setupZoom() {
+  const t = stream && stream.getVideoTracks()[0], c = t && t.getCapabilities ? t.getCapabilities() : {};
+  const z = c.zoom, zr = $('zr');
+  if (!z || !(z.max > z.min)) { $('zoom').hidden = true; return; }
+  zr.min = z.min; zr.max = z.max; zr.step = z.step || 0.1;
+  zr.value = (t.getSettings().zoom) || z.min;
+  $('zv').textContent = Number(zr.value).toFixed(1) + '×';
+  $('zoom').hidden = false;
+}
+$('zr').oninput = () => {
+  const t = stream && stream.getVideoTracks()[0], v = Number($('zr').value);
+  $('zv').textContent = v.toFixed(1) + '×';
+  if (t) t.applyConstraints({advanced: [{zoom: v}]}).catch(() => {});
+};
+function sameSide(d) { const front = /front|user|selfie|facetime/i.test(d.label); return facing === 'user' ? front : !front; }
+async function lenses() {
+  try { return (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput' && d.deviceId && sameSide(d)); }
+  catch (e) { return []; }
+}
+function lensName(label) {
+  return /ultra/i.test(label) ? 'Wide 0.5×' : /tele/i.test(label) ? 'Tele' : /triple|dual/i.test(label) ? 'Auto' : 'Lens 1×';
+}
+async function lensList() {
+  const ls = await lenses(), cur = stream && stream.getVideoTracks()[0];
+  $('lens').hidden = ls.length < 2;
+  const now = ls.find(d => cur && d.deviceId === cur.getSettings().deviceId);
+  $('lens').textContent = now ? lensName(now.label) : 'Lens';
+}
+async function swapCamera() {
+  await getCamera();
+  if (pc) {
+    const s = pc.getSenders().find(x => x.track && x.track.kind === 'video') || pc.getSenders()[0];
+    if (s) await s.replaceTrack(stream.getVideoTracks()[0]);
+    if (micOn) restart('mic');
+  }
 }
 
 function preferH264(tr) {
@@ -139,10 +190,62 @@ async function stats() {
     const lim = out.qualityLimitationReason && out.qualityLimitationReason !== 'none' ? ` · limited by ${out.qualityLimitationReason}` : '';
     const cd = out.codecId && rep.get(out.codecId), pl = cd && /profile-level-id=([0-9a-f]{2})/i.exec(cd.sdpFmtpLine || '');
     const codec = cd ? ' · ' + cd.mimeType.split('/')[1] + (pl ? ({'64': ' High', '4d': ' Main', '42': ' Baseline'})[pl[1].toLowerCase()] || '' : '') : '';
-    $('stats').textContent = `${out.frameWidth || '?'}×${out.frameHeight || '?'} · ${Math.round(out.framesPerSecond || 0)} fps · ${kbps ?? '…'} kbps${codec}${lim}`;
+    const held = !motionOk ? ' · tilt: no sensor' : sentRot ? ` · held sideways (${sentRot}°)` : ' · held upright';
+    $('stats').textContent = `${out.frameWidth || '?'}×${out.frameHeight || '?'} · ${Math.round(out.framesPerSecond || 0)} fps · ${kbps ?? '…'} kbps${codec}${lim}${held}`;
     $('stats').hidden = false;
   } catch (e) {}
 }
+
+// Auto-turn. With Portrait Orientation Lock on, a phone held sideways still sends a tall (portrait) picture whose
+// content lies on its side. The motion sensor tells which side is up and we tell FestCast how the phone is held;
+// FestCast turns the picture only while the frames it receives are tall (it knows their real size; the phone's own
+// track settings can report the requested 1920x1080 instead).
+// Gravity signs differ between browsers (iOS reports them inverted vs Android), so the sign is learnt while the
+// phone is upright (y axis carries gravity); until then the platform's usual sign.
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let gSign = IOS ? -1 : 1, gx = 0, gy = 0, sentRot = null, rotTimer = null, motionOk = false;
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
+  motionOk = true;
+  gx = gx * 0.8 + a.x * 0.2; gy = gy * 0.8 + a.y * 0.2;           // smooth out hand shake
+  if (Math.abs(gy) > 7 && Math.abs(gx) < 3) gSign = gy > 0 ? 1 : -1; // upright portrait: learn the sign
+}
+function wantedRotation() {
+  if (!motionOk) return null;
+  const x = gx * gSign, y = gy * gSign;
+  if (Math.abs(x) < 6 || Math.abs(x) < Math.abs(y) * 1.5) return 0;   // held upright (or flat): a real portrait shot
+  const rear = facing !== 'user';
+  // "up" along -x = phone turned clockwise: the picture's left is the sky -> turn it 90 (rear camera; mirrored front)
+  return (x < 0) === rear ? 90 : 270;
+}
+function checkRotation() {
+  if (!want || !info) return;
+  const r = wantedRotation();
+  if (r === null || r === sentRot) return;
+  clearTimeout(rotTimer);
+  rotTimer = setTimeout(() => {                           // only after it has been held that way for a moment
+    if (wantedRotation() !== r) return;
+    fetch(base + '/orientation', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({held: r})})
+      .then(res => { if (res.ok) sentRot = r; }).catch(() => {});
+  }, 1200);
+}
+let motionOn = false;
+async function startMotion() {
+  if (motionOn) return;
+  try {   // iOS asks once, and only from a tap (the Auto-turn or Start button), on https
+    if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
+      if (await DeviceMotionEvent.requestPermission() !== 'granted') {
+        $('tilt').textContent = '⟲ Motion blocked'; return;
+      }
+    }
+    window.addEventListener('devicemotion', onMotion);
+    motionOn = true; $('tilt').className = 'ok'; $('tilt').textContent = '⟲ Auto-turn on';
+  } catch (e) { $('tilt').textContent = '⟲ Tap again'; }
+}
+$('tilt').onclick = startMotion;
+// Android: no permission needed, start at once
+if (!(typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission)) startMotion();
+setInterval(checkRotation, 700);
 
 async function lockScreenOn() {
   try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wake = await navigator.wakeLock.request('screen'); } catch (e) {}
@@ -161,19 +264,22 @@ $('go').onclick = async () => {
     return;
   }
   want = true; $('go').textContent = 'Stop'; $('go').className = '';
+  sentRot = null;
+  startMotion();
   lockScreenOn();
   connect();
 };
 $('flip').onclick = async () => {
-  facing = facing === 'environment' ? 'user' : 'environment';
-  try {
-    await getCamera();
-    if (pc) {
-      const s = pc.getSenders().find(x => x.track && x.track.kind === 'video') || pc.getSenders()[0];
-      if (s) await s.replaceTrack(stream.getVideoTracks()[0]);
-      if (micOn) restart('mic');
-    }
-  } catch (e) { show('Camera problem', String(e).slice(0, 200), true); }
+  facing = facing === 'environment' ? 'user' : 'environment'; deviceId = null;
+  try { await swapCamera(); } catch (e) { show('Camera problem', String(e).slice(0, 200), true); }
+};
+$('lens').onclick = async () => {
+  const ls = await lenses(); if (ls.length < 2) return;
+  const cur = stream && stream.getVideoTracks()[0], id = cur && cur.getSettings().deviceId;
+  const i = ls.findIndex(d => d.deviceId === id);
+  const prev = deviceId;
+  deviceId = ls[(i + 1) % ls.length].deviceId;
+  try { await swapCamera(); } catch (e) { deviceId = prev; show('Camera problem', String(e).slice(0, 200), true); }
 };
 $('mic').onclick = async () => {
   micOn = !micOn; $('mic').textContent = 'Mic: ' + (micOn ? 'on' : 'off');
@@ -211,5 +317,24 @@ async function poll() {
   } catch (e) { show('Cannot reach FestCast', 'Make sure you are on the festival Wi-Fi, then reload.', true); }
   setInterval(poll, 5000);
   setInterval(stats, 2000);
+})();
+// Tally light: red border = this camera is ON AIR (hold the shot steady), green = in PREVIEW (next up). FestCast
+// reads it from OBS and answers this long-poll the moment it changes. Unknown (no FestCast / OBS link) shows no colour.
+(function () {
+  const el = document.createElement('div'), lab = document.createElement('span');
+  el.id = 'tally'; el.append(lab); document.body.append(el);
+  const TEXT = {program: '● ON AIR · hold steady', preview: 'PREVIEW · you are next', unknown: 'Tally not available', off: ''};
+  const set = t => { if (el.className !== t) { el.className = t; lab.textContent = TEXT[t] || ''; } };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let v = -1;
+  (async () => {
+    for (;;) {
+      try {
+        const r = await fetch(base + '/tally?v=' + v, {cache: 'no-store'});
+        if (!r.ok) { set('unknown'); v = -1; await sleep(r.status === 404 ? 15000 : 3000); continue; }
+        const j = await r.json(); v = j.v; set(j.tally in TEXT ? j.tally : 'unknown');
+      } catch (e) { set('unknown'); v = -1; await sleep(2000); }
+    }
+  })();
 })();
 </script></body></html>

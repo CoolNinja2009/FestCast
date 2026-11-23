@@ -66,6 +66,19 @@ function settingsDialog(c: any) {
   ], true);
 }
 
+/** Auto-turn switch + what the phone's motion sensor reports. Used on the Cameras page and in the layout editor. */
+export function autoTurn(c: any): HTMLElement {
+  const age = c.held_at ? Date.now() / 1000 - c.held_at : null;
+  const said = c.held == null ? 'phone has not reported (tap "Auto-turn" on the phone and allow Motion)'
+    : `phone held ${c.held ? `sideways (${c.held}°)` : 'upright'}${age != null && age > 120 ? `, ${Math.round(age / 60)} min ago` : ''}`;
+  return h('span.row', { style: { gap: '6px', alignItems: 'center' } },
+    h('button.btn.sm', { class: c.auto_turn ? 'on' : '',
+      title: 'Auto-turn: the phone page reads its motion sensor and FestCast turns the picture when the phone is held sideways with Portrait Orientation Lock on. Off: the picture stays as it is (use Turn picture).',
+      onclick: () => act(() => api('PATCH', `/api/cameras/${c.id}`, { auto_turn: !c.auto_turn }), c.auto_turn ? 'Auto-turn off' : 'Auto-turn on') },
+      c.auto_turn ? '⟲ Auto-turn: on' : '⟲ Auto-turn: off'),
+    h('span.tiny.dim', null, said));
+}
+
 function card(c: any) {
   const p = store.get('production') || {};
   const obs = store.get('obs') || {};
@@ -77,8 +90,7 @@ function card(c: any) {
     h('div.mon', { class: onPgm ? 'pgm' : '' }, onPgm ? h('span.lab', null, 'ON AIR') : null, previewImg(c.id, c.status === 'live' ? 'Waiting for OBS frame…' : 'No feed')),
     h('div.head', null, h('b', null, c.name), h('span.faint.small', null, `#${c.slot}`), h('span.right'), pill(c.status), c.audio_active ? h('span.pill.ok.plain', { title: 'This camera\'s audio is live in OBS' }, '🎙 audio') : null),
     c.below_target ? h('div.warnline', null, `Receiving ${res}, below the ${c.resolution_target} target. Check the phone's camera choice and Wi-Fi.`) : null,
-    c.portrait ? h('div.warnline', null, h('b', null, 'Portrait feed. '),
-      'Sideways? Rotate the tile in Production, or use Fill.') : null,
+    h('div.small', { style: { padding: '0 12px' } }, autoTurn(c)),
     c.target_pending ? h('div.warnline', null, `New target ${c.resolution_target}: ask the operator to re-open the link.`) : null,
     c.status === 'no_probe' && obs.connected ? h('div.warnline', null, 'OBS is not running this camera\'s source yet - it will start monitoring within seconds.') : null,
     h('div.stats', null,

@@ -2,6 +2,8 @@
 name = "festcast"
 version = "1.0.0"
 requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

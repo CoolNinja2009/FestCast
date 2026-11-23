@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     obs_host: str = "127.0.0.1"
     obs_port: int = 4455
     obs_password: str = ""
+    # Start OBS with FestCast (if it isn't running) in its own profile + scene collection, so the user's normal
+    # OBS setup is never touched; their last used profile/collection is given back when that OBS closes.
+    obs_autostart: bool = True
+    obs_path: str = ""               # auto: registry / Program Files / PATH
+    obs_profile: str = "FestCast"
+    obs_collection: str = "FestCast"
     # simulation = in-memory mock OBS; never mixed with a real connection
     simulation: bool = False
 
@@ -71,11 +77,13 @@ class Settings(BaseSettings):
     def soffice(self) -> str | None:
         return self.tool("soffice", self.soffice_path, [
             Path(r"C:\Program Files\LibreOffice\program\soffice.exe"),
-            Path("/usr/bin/soffice"), Path("/usr/bin/libreoffice")])
+            Path("/usr/bin/soffice"), Path("/usr/bin/libreoffice"),
+            Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")])
 
     @property
     def mediamtx(self) -> str | None:
         return self.tool("mediamtx", self.mediamtx_path, [
+            ROOT / "bin" / "mediamtx.exe", ROOT / "bin" / "mediamtx",            # release packages
             ROOT / "tools" / "mediamtx" / "mediamtx.exe", ROOT / "tools" / "mediamtx" / "mediamtx"])
 
 

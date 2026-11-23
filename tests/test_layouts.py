@@ -108,3 +108,52 @@ def test_camera_removed_from_layouts(lay):
     els = env.ctx.layouts.get(l["id"]).elements
     assert all(e.get("camera_id") != cid for e in els) and len(els) == 2
     assert cam_input_name(cid) not in _items(env, "FC Layout · Main")
+
+
+
+def test_camera_source_takes_picture_shape(env):
+    """An upright phone gives a tall OBS source; the tile just fits it (no crop). Turning back restores 16:9."""
+    env.create_production(2)
+    a, b = env.cam_ids()
+    els = [{"type": "camera", "id": "c1", "camera_id": a, "x": 0, "y": 0, "w": 0.5, "h": 1, "z": 0,
+            "crop": {"l": 0.35, "t": 0.0259, "r": 0.35, "b": 0.0259}},       # old Landscape/Portrait crop
+           {"type": "camera", "id": "c2", "camera_id": b, "x": 0.5, "y": 0, "w": 0.5, "h": 1, "z": 1}]
+    l = env.client.post("/api/layouts", json={"name": "Two", "elements": els}).json()
+    assert l["elements"][0]["crop"] == {"l": 0, "t": 0, "r": 0, "b": 0}       # cleaned on save
+    rep = env.report(a, {"x": {"Resolution": "1080 x 1920", "_FPS": 30, "video_bitrate_kbps": 5000}}).json()
+    assert (rep["width"], rep["height"]) == (1080, 1920)
+    cam = env.ctx.cameras.camera(a)
+    assert env.ctx.cameras.source_size(cam) == (1080, 1920)
+    env.run(env.ctx.cameras.sync_camera_obs, a)
+    st = env.mock.inputs[cam_input_name(a)]["settings"]
+    assert (st["width"], st["height"]) == (1080, 1920)
+    env.run(env.ctx.layouts.sync, l["id"])
+    t = _items(env, "FC Layout · Two")[cam_input_name(a)]["sceneItemTransform"]
+    assert t["cropLeft"] == t["cropRight"] == t["cropTop"] == 0 and t["boundsHeight"] == 1080
+    env.client.patch(f"/api/cameras/{a}", json={"rotation": 90})              # lying on its side: wide again
+    assert env.ctx.cameras.source_size(env.ctx.cameras.camera(a)) == (1920, 1080)
+    env.report(a, {"x": {"Resolution": "1920 x 1080", "_FPS": 30, "video_bitrate_kbps": 5000}})
+    assert env.ctx.cameras.source_size(env.ctx.cameras.camera(a)) == (1080, 1920)   # 1920x1080 turned 90
+
+
+
+def test_auto_arrange(env):
+    from backend.services.layouts import arrange
+    two = arrange([16 / 9, 16 / 9], 1920, 1080)
+    assert two == [(0.0, 0.25, 0.5, 0.5), (0.5, 0.25, 0.5, 0.5)]
+    mixed = arrange([9 / 16, 16 / 9], 1920, 1080)
+    assert mixed[0][2] < mixed[1][2] and abs(mixed[0][3] - mixed[1][3]) < 1e-9      # same height, tall one narrow
+    env.create_production(2)
+    a, b = env.cam_ids()
+    els = [{"type": "camera", "id": "c1", "camera_id": a, "x": 0, "y": 0, "w": 0.5, "h": 1, "z": 0},
+           {"type": "camera", "id": "c2", "camera_id": b, "x": 0.5, "y": 0, "w": 0.5, "h": 1, "z": 1},
+           {"type": "text", "id": "t1", "text": "Hi", "x": 0.1, "y": 0.9, "z": 2}]
+    lid = env.client.post("/api/layouts", json={"name": "A", "elements": els}).json()["id"]
+    v = env.client.put(f"/api/layouts/{lid}", json={"auto_arrange": True}).json()
+    assert v["auto_arrange"] is True
+    c1 = next(e for e in v["elements"] if e["id"] == "c1")
+    assert (c1["y"], c1["h"]) == (0.25, 0.5)                          # both 16:9 (unknown): side by side
+    env.report(a, {"x": {"Resolution": "1080 x 1920", "_FPS": 30, "video_bitrate_kbps": 5000}})
+    env.run(env.ctx.layouts.sync, lid)
+    els2 = {e["id"]: e for e in env.ctx.layouts.get(lid).elements}
+    assert els2["c1"]["w"] < els2["c2"]["w"] and els2["t1"]["y"] == 0.9   # tall tile for the phone; text untouched

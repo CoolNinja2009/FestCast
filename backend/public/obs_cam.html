@@ -164,6 +164,8 @@ setInterval(async () => {
     const j = await r.json();
     if (j.reload !== undefined && reload !== null && j.reload !== reload) config();
     if (j.rotation !== undefined) setPicture(j.rotation, j.frame);
+    // FestCast's own reading of the picture size (it searches the whole stats object): use it when ours missed it
+    if (j.width && j.height && (j.width / j.height).toFixed(3) !== (vw / vh).toFixed(3)) { vw = j.width; vh = j.height; layout(); }
   } catch (e) {}
 }, 2000);
 setInterval(config, 5000);

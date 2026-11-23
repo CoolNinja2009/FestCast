@@ -1,5 +1,6 @@
 import { act, api, clear, confirmBox, disposers, h, live, previewImg, store, toast } from '../lib';
 import { layoutEditor } from '../components/editor';
+import { slideControls } from './presentations';
 
 let scenes: { name: string; owned: boolean }[] = [];
 let directMode = false;
@@ -31,7 +32,7 @@ export function productionPage(el: HTMLElement) {
       h('div.ph', null, h('h2', null, 'Scenes'),
         h('label.c.right.small', null, h('input', { type: 'checkbox', checked: directMode, onchange: (e: any) => { directMode = e.target.checked; } }), 'Direct cut (click goes live)')),
       live(h('div.pb'), ['_scenes', 'obs', 'production'], sceneButtons)),
-    live(h('div.panel', { style: { marginTop: '14px' } }), ['production', '_scenes'], standbyPanel),
+    live(h('div.panel', { style: { marginTop: '14px' } }), ['production', '_scenes', 'presentations'], standbyPanel),
     h('div.panel', { style: { marginTop: '14px' } }, h('div.ph', null, h('h2', null, 'Layout editor')),
       h('div.pb', null, layoutEditor())),
     audioPanel(),
@@ -104,6 +105,7 @@ function standbyPanel() {
         h('div.row.wrap', null,
           h('button.btn.standby.lg', { class: p.standby_active ? 'active' : '', onclick: () => act(() => api('POST', '/api/standby/on'), 'Standby on air') }, 'ACTIVATE STANDBY'),
           ret, h('button.btn.lg.green', { disabled: !p.standby_active, onclick: () => act(() => api('POST', '/api/standby/off', { scene: ret.value || null }), 'Back to production') }, 'Return to production')),
+        h('b.small', null, 'Standby slides'), slideControls(),
         h('a.small', { href: '#/presentations' }, 'Choose the standby presentation →')),
       h('div.col', null,
         h('label.c', null, h('input', { type: 'checkbox', checked: !!r.when_no_cameras, onchange: (e: any) => save({ when_no_cameras: e.target.checked }) }), 'Auto-standby when the production is started but NO camera is live'),
@@ -113,7 +115,7 @@ function standbyPanel() {
         h('b.small', null, 'Scheduled intermissions'), sched))];
 }
 
-function audioPanel() {
+export function audioPanel() {
   const body = h('div.pb');
   const bars = new Map<string, { bar: HTMLElement; peak: HTMLElement; strip: HTMLElement; txt: HTMLElement }>();
   // Mute all remembers which sources were on, so undoing it leaves deliberately muted ones (camera mics) muted.

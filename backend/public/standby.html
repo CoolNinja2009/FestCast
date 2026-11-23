@@ -15,7 +15,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-f
 <div id="brand"></div>
 <script>
 const k = new URLSearchParams(location.search).get('k');
-let state = null, idx = -1, timer = null, nonce = null;
+let state = null, idx = -1, timer = null, nonce = null, seq = null, paused = false;
 const stage = document.getElementById('stage');
 function show() {
   clearTimeout(timer);
@@ -38,14 +38,28 @@ function show() {
   const img = new Image(); img.onload = img.onerror = () => requestAnimationFrame(() => requestAnimationFrame(() => d.classList.add('on')));
   img.src = s.url;
   setTimeout(() => { while (stage.children.length > 1) stage.removeChild(stage.firstChild); }, 1200);
-  timer = setTimeout(show, Math.max(1, s.duration) * 1000);
+  schedule();
+}
+// the slide timer; off while the operator has paused the presentation (they move it by hand)
+function schedule() {
+  clearTimeout(timer);
+  const slides = (state && state.slides) || [];
+  if (!paused && slides.length && idx >= 0) timer = setTimeout(show, Math.max(1, slides[idx].duration) * 1000);
 }
 async function poll() {
   try {
-    const r = await fetch('/obs/standby/state?k=' + encodeURIComponent(k), {cache: 'no-store'});
-    if (r.ok) { const j = await r.json(); if (j.nonce !== nonce) { state = j; nonce = j.nonce; idx = -1; show(); } }
+    const at = state && state.slides && state.slides.length ? idx : -1;
+    const r = await fetch('/obs/standby/state?k=' + encodeURIComponent(k) + '&at=' + at + (seq !== null ? '&seq=' + seq : ''), {cache: 'no-store'});
+    if (!r.ok) return;
+    const j = await r.json();
+    const p = !!j.paused, fresh = j.nonce !== nonce;
+    if (fresh) { state = j; nonce = j.nonce; idx = -1; paused = p; if (seq === null) seq = j.cmd_seq; show(); }
+    if (j.cmd_seq !== seq) {                      // operator: go to this slide (handled once)
+      seq = j.cmd_seq; paused = p;
+      if (state.slides.length) { idx = (j.cmd_index - 1 + state.slides.length) % state.slides.length; show(); }
+    } else if (p !== paused) { paused = p; schedule(); }
   } catch (e) {}
 }
 setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); }, 1000);
-setInterval(poll, 3000); poll();
+setInterval(poll, 500); poll();   // local and tiny: fast enough that Next feels immediate
 </script></body></html>

@@ -25,7 +25,7 @@ REMOTE = ("192.168.0.50", 5000)
 
 def make_settings(tmp_path: Path, **kw) -> Settings:
     base = dict(data_dir=tmp_path / "data", simulation=True, public_host=LAN, port=8000, admin_password="", mdns_name="",
-                obs_password="", mediamtx_path="", metrics_interval=60.0, preview_interval=60.0,
+                obs_password="", obs_autostart=False, mediamtx_path="", metrics_interval=60.0, preview_interval=60.0,
                 camera_transport="vdoninja")
     base.update(kw)
     s = Settings(_env_file=None, **base)

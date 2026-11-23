@@ -1,6 +1,7 @@
 // Visual composition editor. Elements use normalised coordinates (0..1 of the canvas); every committed change is
 // saved to SQLite and materialised in the layout's OBS scene via SetSceneItemTransform (backend/services/layouts.py).
 import { act, api, clear, confirmBox, disposers, download, h, modal, pickFile, promptBox, store, toast } from '../lib';
+import { autoTurn } from '../pages/cameras';
 
 type El = {
   id: string; type: 'camera' | 'text' | 'image' | 'color'; name: string; x: number; y: number; w: number; h: number; z: number;
@@ -25,6 +26,12 @@ function autoGrid(n: number): number[][] {
     out.push([off + (i % cols) * w, r * hh, w, hh]);
   }
   return out;
+}
+
+/** The crop older versions of "Landscape/Portrait" put on camera tiles; ignored now (camera sources have the
+ * picture's own shape). Same test as layouts.turned_crop on the server. */
+function turnedCrop(c: { l: number; t: number; r: number; b: number }): boolean {
+  return Math.abs(c.l - .35) < .003 && Math.abs(c.r - .35) < .003 && Math.abs(c.t - c.b) < .003 && c.t < .05;
 }
 
 function mk(type: El['type'], extra: Partial<El> = {}): El {
@@ -197,7 +204,12 @@ export function layoutEditor(): HTMLElement {
       style: { left: e.x * 100 + '%', top: e.y * 100 + '%', width: e.w * 100 + '%', height: e.h * 100 + '%', zIndex: String(e.z), opacity: String(e.hidden ? .25 : e.opacity) },
     });
     const bgCrop = () => {
-      const c = e.crop, sx = 1 - c.l - c.r, sy = 1 - c.t - c.b;
+      const c = turnedCrop(e.crop) ? { l: 0, t: 0, r: 0, b: 0 } : e.crop, sx = 1 - c.l - c.r, sy = 1 - c.t - c.b;
+      if (e.type === 'camera' && e.fit !== 'stretch' && !(c.l || c.t || c.r || c.b)) {
+        // like OBS: the camera picture (its preview has the picture's own shape) fitted inside the tile, centred
+        n.style.backgroundSize = 'contain'; n.style.backgroundPosition = 'center'; n.style.backgroundRepeat = 'no-repeat';
+        return;
+      }
       n.style.backgroundSize = e.fit === 'stretch' || e.type === 'camera' ? `${100 / sx}% ${100 / sy}%` : 'contain';
       n.style.backgroundPosition = `${c.l + c.r ? (c.l / (c.l + c.r)) * 100 : 0}% ${c.t + c.b ? (c.t / (c.t + c.b)) * 100 : 0}%`;
       n.style.backgroundRepeat = 'no-repeat';
@@ -379,8 +391,7 @@ export function layoutEditor(): HTMLElement {
     const g = on ? uid() : null;
     change(() => s.forEach(e => { e.group = g; }));
   }
-  /** Turn a tile 90° about its centre: landscape <-> portrait. A portrait camera tile crops the source to its middle
-   * 9:16 strip (where FestCast's OBS page puts an upright phone picture), so the picture fills the tile. */
+  /** Turn a tile 90° about its centre: landscape <-> portrait (a tall tile for an upright phone). */
   function turnTile(e: El) {
     if (e.locked) return;
     change(() => {
@@ -391,10 +402,8 @@ export function layoutEditor(): HTMLElement {
       e.w = r4(wpx / W); e.h = r4(hpx / H);
       e.x = r4(clamp(cx - e.w / 2, 0, 1 - e.w)); e.y = r4(clamp(cy - e.h / 2, 0, 1 - e.h));
       if (e.type === 'camera') {
-        // The 9:16 middle is 34.2% in from each side; cut 35% (and a little top/bottom to stay 9:16) so the
-        // picture's edge never shows as a seam at the tile's edge.
-        const side = 0.35, tb = r4((1 - (1 - 2 * side) * (16 / 9) ** 2) / 2);   // 576x1024 of 1920x1080 = 9:16
-        e.crop = hpx > wpx ? { l: side, t: tb, r: side, b: tb } : { l: 0, t: 0, r: 0, b: 0 };
+        // the camera source already has the picture's shape: the tile only changes shape, no crop needed
+        if (turnedCrop(e.crop)) e.crop = { l: 0, t: 0, r: 0, b: 0 };
         e.fit = 'fit';
       }
     });
@@ -440,6 +449,9 @@ export function layoutEditor(): HTMLElement {
         h('button.btn.sm', { onclick: () => download(`/api/layouts/${l.id}/export`) }, 'Export'),
         h('button.btn.sm', { onclick: checkObs }, 'Check OBS'),
         h('button.btn.sm.ghost.danger', { onclick: async () => { if (await confirmBox('Delete layout', `Delete "${l.name}" and its OBS scene?`, 'Delete')) { const r = await act(() => api('DELETE', `/api/layouts/${l.id}`), 'Layout deleted'); if (r) load(null); } } }, 'Delete')),
+      h('label.c.small', { title: 'FestCast places the camera tiles itself from each picture\'s real shape (upright phone = tall tile) and re-arranges them when a phone is turned. Text, images and shapes stay where you put them.' },
+        h('input', { type: 'checkbox', checked: !!l.auto_arrange, onchange: (e: any) => act(() => api('PUT', `/api/layouts/${l.id}`, { auto_arrange: e.target.checked }), e.target.checked ? 'Camera tiles are arranged automatically' : 'Auto arrange off') }),
+        h('b', null, 'Auto arrange cameras'), ' (fit every picture as large as possible)'),
       h('label.c.small', null, h('input', { type: 'checkbox', checked: holdLive, onchange: (e: any) => { holdLive = e.target.checked; } }), 'When this layout is live, hold edits until "Push to air"'));
     const tplSec = h('div.sec', null, h('b', null, 'Templates'), h('div.tpl', null, TEMPLATES.map(t => h('button', { title: t.id === 'auto' ? `${t.label}: ${cams().length} camera(s)` : t.label,
       class: t.n === tplSuggest || (t.id === 'auto' && tplSuggest > 6) ? 'sug' : '', onclick: () => applyTemplate(t) },
@@ -471,14 +483,15 @@ export function layoutEditor(): HTMLElement {
           const portrait = e.h * H > e.w * W;
           return h('div.col', null,
             h('div.row.wrap', null,
-              h('button.btn.sm', { class: portrait ? 'on' : '', title: 'Turn this tile between landscape and portrait. Portrait shows the middle of the picture, where an upright phone\'s video sits.',
+              h('button.btn.sm', { class: portrait ? 'on' : '', title: 'Turn this tile between landscape and portrait. The camera picture always keeps its own shape and is fitted inside the tile.',
                 onclick: () => turnTile(e) }, portrait ? '⟳ Portrait' : '⟳ Landscape')),
             h('div.row.wrap', null,
               h('button.btn.sm', { title: 'Turn the camera\'s picture itself 90° (iPhone Portrait Orientation Lock). Applies wherever this camera is used.',
                 onclick: async () => {
                   const r = await act(() => api('PATCH', `/api/cameras/${e.camera_id}`, { rotation: (rot + 90) % 360 }));
                   if (r && cam) { cam.rotation = r.rotation; drawInsp(); }
-                } }, `Turn picture ${rot}°`)));
+                } }, `Turn picture ${rot}°`)),
+            cam ? autoTurn(cam) : null);
         })() : null,
         h('label.f', null, 'Fit', h('select', { onchange: (ev: any) => change(() => { e.fit = ev.target.value; }) },
           h('option', { value: 'fit', selected: e.fit === 'fit' }, 'Fit inside (keep ratio)'), h('option', { value: 'stretch', selected: e.fit === 'stretch' }, 'Stretch to box'))),

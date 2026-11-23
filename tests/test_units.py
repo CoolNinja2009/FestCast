@@ -138,6 +138,7 @@ def test_view_url():
     url = VdoNinjaInputAdapter().view_url(_cam(bitrate_kbps=4500))
     q = _qs(url)
     assert q["view"] == ["fcabc"] and q["videobitrate"] == ["4500"] and "cleanoutput" in q
+    assert q["buffer"] == ["0"] and "lowlatency" in q
     assert q["password"] == ["p@ss word"] and "push" not in q
 
 
@@ -164,3 +165,25 @@ def test_revoked_stream_never_reused(env):
         assert s.get(RetiredStream, old) is not None
         assert s.query(Camera).filter(Camera.stream_id == old).first() is None
     assert env.ctx.cameras.camera(cid).stream_id != old
+
+
+def test_obs_log_audio_buffering(tmp_path):
+    from backend.services.metrics import ObsLogWatch
+    old = tmp_path / "2026-01-01 10-00-00.txt"
+    old.write_text("adding 960 milliseconds of audio buffering, total audio buffering is now 960 milliseconds "
+                   "(source: Old)\n", encoding="utf-8")
+    w = ObsLogWatch(tmp_path)
+    assert w.check() == (960, "Old")
+    import os
+    import time
+    new = tmp_path / "2026-01-02 10-00-00.txt"
+    new.write_text("OBS starting\n", encoding="utf-8")
+    t = time.time() + 5
+    os.utime(new, (t, t))
+    assert w.check() == (0, None)                       # OBS restarted: fresh log, no buffering
+    with open(new, "a", encoding="utf-8") as f:
+        f.write("adding 21 milliseconds of audio buffering, total audio buffering is now 21 milliseconds "
+                "(source: Desktop Audio)\n")
+    os.utime(new, (t + 1, t + 1))
+    assert w.check() == (21, "Desktop Audio")
+    assert ObsLogWatch(tmp_path / "missing").check() == (None, None)

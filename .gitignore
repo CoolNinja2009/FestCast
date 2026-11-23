@@ -9,3 +9,4 @@ frontend/dist/
 .pytest_cache/
 *.log
 data-sim/
+dist/

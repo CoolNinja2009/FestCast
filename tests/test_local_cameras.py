@@ -133,3 +133,52 @@ def test_transport_change_and_reconnect_refresh_obs_page(env_factory):
     assert inp["pressed"] == ["refreshnocache", "refreshnocache"]
     cfg = e.client.get(f"/obs/cam/{cid}/config", params={"k": e.ctx.local_key}).json()
     assert isinstance(cfg["page"], int)
+
+
+def test_phone_sets_rotation_from_its_motion_sensor(env_factory):
+    e, _ = _local_env(env_factory)
+    cid = e.create_production(1)["cameras"][0]["id"]
+    url = f"/api/public/cam/{_tok(e, cid)}/orientation"
+    k = {"k": e.ctx.local_key}
+
+    def frames(w, hgt):
+        e.client.post(f"/obs/cam/{cid}/stats", params=k, json={"parsed": {"width": w, "height": hgt, "fps": 30,
+                                                                           "bitrate_kbps": 5000}})
+    assert e.client.post(url, json={"held": 45}).status_code == 400
+    frames(1080, 1920)                               # Portrait Orientation Lock: tall frames
+    assert e.client.post(url, json={"held": 270}).json()["rotation"] == 270
+    assert e.ctx.cameras.camera(cid).rotation == 270
+    e.client.post(url, json={"held": 0})             # upright: a real portrait shot
+    assert e.ctx.cameras.camera(cid).rotation == 0
+    frames(1920, 1080)                               # lock off: the phone sends landscape itself
+    assert e.client.post(url, json={"held": 90}).json()["rotation"] == 0
+    assert e.client.post("/api/public/cam/nope/orientation", json={"held": 90}).status_code == 404
+
+
+def test_vdoninja_camera_gets_auto_turn_page(env_factory):
+    e = env_factory(camera_transport="vdoninja", https_port=8443)
+    cid = e.create_production(1)["cameras"][0]["id"]
+    tok = e.ctx.cameras.invitation(cid).token
+    j = e.remote().get(f"/api/public/join/{tok}").json()
+    assert j["transport"] == "vdoninja" and j["publish_url"].startswith("https://vdo.ninja/")
+    assert j["wrap_url"] == f"https://192.168.1.10:8443/vcam/{tok}"
+    r = e.remote().get(f"/vcam/{tok}", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == j["wrap_url"]
+    e.client.post(f"/obs/cam/{cid}/stats", params={"k": e.ctx.local_key},
+                  json={"stats": {"Resolution": "1080 x 1920", "_FPS": 30, "video_bitrate_kbps": 5000}})
+    assert e.client.post(f"/api/public/cam/{tok}/orientation", json={"held": 90}).json()["rotation"] == 90
+    assert e.ctx.cameras.camera(cid).rotation == 90
+
+
+def test_auto_turn_switch(env_factory):
+    e, _ = _local_env(env_factory)
+    cid = e.create_production(1)["cameras"][0]["id"]
+    url = f"/api/public/cam/{_tok(e, cid)}/orientation"
+    e.client.post(f"/obs/cam/{cid}/stats", params={"k": e.ctx.local_key},
+                  json={"parsed": {"width": 1080, "height": 1920, "fps": 30, "bitrate_kbps": 5000}})
+    cam = lambda: next(c for c in e.client.get("/api/state").json()["cameras"]["cameras"] if c["id"] == cid)  # noqa: E731
+    assert cam()["auto_turn"] is True and cam()["held"] is None           # phone never reported yet
+    assert e.client.patch(f"/api/cameras/{cid}", json={"auto_turn": False}).json()["auto_turn"] is False
+    assert e.client.post(url, json={"held": 90}).json()["rotation"] == 0  # off: reported, not applied
+    assert cam()["held"] == 90 and cam()["rotation"] == 0
+    assert e.client.patch(f"/api/cameras/{cid}", json={"auto_turn": True}).json()["rotation"] == 90   # on: follows

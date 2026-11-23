@@ -5,6 +5,7 @@ import asyncio
 import io
 import json
 import logging
+import os
 import platform
 import secrets
 import sys
@@ -24,6 +25,8 @@ from ..services.layouts import LayoutService
 from ..services.metrics import MetricsService, lan_ip
 from .mdns import Mdns
 from ..services.outputs import OutputService
+from ..services.live import LiveService
+from ..services.tally import TallyService
 from ..services.presentations import PresentationService
 from ..services.production import ProductionService
 from ..services.workspace import WorkspaceService
@@ -33,10 +36,37 @@ from .events import EventBus, setup_logging
 log = logging.getLogger("festcast")
 
 
+_awake_proc = None
+
+
 def keep_awake(on: bool) -> None:
-    """Stop Windows sleeping or blanking the screen while FestCast runs (a sleeping PC ends the show).
-    SetThreadExecutionState is per thread; FestCast's event loop thread lives for the whole run."""
+    """Stop the PC sleeping or blanking the screen while FestCast runs (a sleeping PC ends the show).
+    Windows: SetThreadExecutionState (per thread; FestCast's event loop thread lives for the whole run).
+    macOS: `caffeinate` tied to this process. Linux: `systemd-inhibit` holding sleep/idle while this process lives."""
+    global _awake_proc
     if sys.platform != "win32":
+        import shutil
+        import subprocess
+        if not on:
+            if _awake_proc and _awake_proc.poll() is None:
+                _awake_proc.terminate()
+            _awake_proc = None
+            return
+        pid = str(os.getpid())
+        if sys.platform == "darwin" and shutil.which("caffeinate"):
+            cmd = ["caffeinate", "-dims", "-w", pid]
+        elif shutil.which("systemd-inhibit"):
+            cmd = ["systemd-inhibit", "--what=sleep:idle", "--who=FestCast", "--why=Live show running",
+                   "--mode=block", "sh", "-c", f"while kill -0 {pid} 2>/dev/null; do sleep 5; done"]
+        else:
+            log.warning("cannot block sleep on this system: switch off sleep / screen blanking by hand")
+            return
+        try:
+            _awake_proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                           stderr=subprocess.DEVNULL)
+            log.info("sleep blocked while FestCast runs (%s)", cmd[0])
+        except OSError as e:
+            log.warning("could not block sleep: %s", e)
         return
     try:
         import ctypes
@@ -73,6 +103,8 @@ class Ctx:
         self.production = ProductionService(self)
         self.recording = RecordingService(self)
         self.outputs = OutputService(self)
+        self.live = LiveService(self)
+        self.tally = TallyService(self)
         self.presentations = PresentationService(self)
         self.workspace = WorkspaceService(self)
         self.audio = AudioService(self)
@@ -103,8 +135,10 @@ class Ctx:
         return self.settings.https_port
 
     def https_base(self, ip: bool = False) -> str:
-        """Base of the local phone camera page (self-signed HTTPS: phones confirm it once)."""
-        return f"https://{self.lan_ip if ip else (self.mdns.host or self.lan_ip)}:{self.settings.https_port}"
+        """Base of the local phone camera page (self-signed HTTPS: phones confirm it once). Always the LAN IP, never
+        the .local name: iPhones would not open https on the .local name (page stuck loading), but do on the IP
+        (verified on iOS 27, 2026-11-20). `ip` is kept for callers; both give the same link."""
+        return f"https://{self.lan_ip}:{self.settings.https_port}"
 
     async def _start_mdns(self) -> None:
         if await self.mdns.start():
@@ -116,12 +150,44 @@ class Ctx:
         self.layouts.publish()
         log.info("programme=%s preview=%s", self.obs.state.get("program_scene"), self.obs.state.get("preview_scene"))
 
+    @property
+    def own_obs(self) -> bool:
+        s = self.settings
+        return s.obs_autostart and not s.simulation and s.obs_host in ("127.0.0.1", "localhost", "::1")
+
+    async def _launch_obs(self) -> None:
+        from ..obs.launcher import ensure_obs
+        s = self.settings
+        try:
+            r = await asyncio.to_thread(ensure_obs, s.obs_path, s.obs_profile, s.obs_collection,
+                                        s.data_dir / "obs_session.json")
+            log.info("OBS autostart: %s", r)
+            if r.startswith("not found"):
+                self.bus.notify("warning", "FestCast could not find OBS to start it. Start OBS yourself or set "
+                                "FESTCAST_OBS_PATH in .env.", "obs")
+        except Exception as e:  # noqa: BLE001
+            log.exception("OBS autostart failed")
+            self.bus.notify("warning", f"Could not start OBS: {e}", "obs")
+
+    async def _check_collection(self) -> None:
+        """FestCast's scenes belong in its own OBS scene collection. If OBS was opened another way, say so."""
+        if not self.own_obs:
+            return
+        r = await self.obs.try_call("GetSceneCollectionList")
+        cur = (r or {}).get("currentSceneCollectionName")
+        if cur and cur != self.settings.obs_collection:
+            self.bus.notify("warning", f"OBS is using your scene collection '{cur}', not '{self.settings.obs_collection}'"
+                            ": FestCast's scenes will be added there. To keep your OBS clean, close OBS and restart "
+                            "FestCast (it opens OBS itself).", "obs")
+
     async def _resync(self) -> None:
         """After (re)connecting to OBS: recreate anything missing. Existing sources are kept, so a live
         programme is not disturbed."""
+        await self._check_collection()
         await self.production.ensure_standby()
         await self.cameras.sync_all()
         await self.layouts.sync_all()
+        await self.audio.sync_all()
         await self.recording.on_obs_connect()
         await self.outputs.resume_if_wanted()
         self.production.publish()
@@ -155,8 +221,11 @@ class Ctx:
                  self.public_base)
         self.started_at = time.time()
         keep_awake(True)
+        if self.own_obs:
+            self._tasks.append(asyncio.create_task(self._launch_obs(), name="obs-launch"))
         self.obs.start()
-        self._loops = {"metrics": self.metrics.run, "standby": self.production.run, "previews": self.preview_loop}
+        self._loops ={"metrics": self.metrics.run, "standby": self.production.run, "previews": self.preview_loop,
+                       "tally": self.tally.run}
         self._loop_tasks = {name: asyncio.create_task(f(), name=name) for name, f in self._loops.items()}
         self.restarts: dict[str, int] = {}
         self._tasks.append(asyncio.create_task(self._supervise(), name="supervisor"))
@@ -164,6 +233,7 @@ class Ctx:
         if self.outputs.want_programme:
             self.outputs.ensure_watchdog()
         self._tasks.append(asyncio.create_task(self.cameras.ensure_mtx(), name="camera-mediamtx"))
+        self._tasks.append(asyncio.create_task(self.live.resume_if_wanted(), name="live-resume"))
 
     async def _supervise(self) -> None:
         """A long show must never lose a background loop to an unexpected bug: restart any that ends."""
@@ -186,6 +256,7 @@ class Ctx:
         for t in [*self._tasks, *getattr(self, "_loop_tasks", {}).values()]:
             t.cancel()
         await asyncio.gather(*self._tasks, *getattr(self, "_loop_tasks", {}).values(), return_exceptions=True)
+        await self.live.shutdown()
         await self.outputs.shutdown()
         await self.obs.stop()
         await self.mdns.stop()
@@ -203,7 +274,8 @@ class Ctx:
                 "cameras": cams, "recording": {k: v for k, v in self.recording.view().items()},
                 "outputs": {"mediamtx": self.outputs.view()["mediamtx"],
                             "receivers": [{k: v for k, v in r.items() if k not in ("link", "ip_link")}
-                                          for r in self.outputs.view()["receivers"]]},
+                                          for r in self.outputs.view()["receivers"]],
+                            "live": self.live.view()},
                 "metrics": self.metrics.latest, "notifications": list(self.bus.notifications)}
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("diagnostics.json", json.dumps(info, indent=2, default=str))
@@ -221,6 +293,7 @@ class Ctx:
             out += [c.stream_id for c in s.query(Camera)] + [r.token for r in s.query(Receiver)]
             from ..database.models import Invitation, Production
             out += [i.token for i in s.query(Invitation)] + [p.vdo_password for p in s.query(Production)]
+        out += self.live.secrets()
         return [x for x in out if x]
 
     def export_config(self) -> dict:

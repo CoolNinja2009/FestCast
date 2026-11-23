@@ -124,12 +124,21 @@ class RecordingService:
         if mode != "Simple" and c.get("segment_minutes"):
             sets += [(sec, "RecSplitFile", "true"), (sec, "RecSplitFileType", "Time"),
                      (sec, "RecSplitFileTime", str(int(c["segment_minutes"])))]
+        iso = self.ctx.audio.iso_mask()
+        if mode != "Simple" and iso > 1:
+            # hall inputs with isolated tracks: add them to the recorded tracks (keeps any the operator chose in OBS)
+            cur = await obs.try_call("GetProfileParameter", {"parameterCategory": sec, "parameterName": "RecTracks"})
+            try:
+                have = int((cur or {}).get("parameterValue") or 1)
+            except ValueError:
+                have = 1
+            sets.append((sec, "RecTracks", str(have | iso)))
         # OBS caches the muxer/encoder settings in its outputs: changing them in the profile is NOT used until the
         # outputs are rebuilt (verified: a "mkv" profile still wrote MP4). Remember what changes, reload if needed.
         needs_reload = False
         for cat, name, val in sets:
             before = await obs.try_call("GetProfileParameter", {"parameterCategory": cat, "parameterName": name})
-            if name in ("RecFormat2", "RecEncoder", "RecQuality") and (before or {}).get("parameterValue") != val:
+            if name in ("RecFormat2", "RecEncoder", "RecQuality", "RecTracks") and (before or {}).get("parameterValue") != val:
                 needs_reload = True
             await obs.try_call("SetProfileParameter", {"parameterCategory": cat, "parameterName": name,
                                                        "parameterValue": val})

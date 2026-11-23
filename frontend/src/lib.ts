@@ -220,7 +220,7 @@ export function clock(ts: number) { return new Date(ts * 1000).toLocaleTimeStrin
 
 export const STATUS_LABEL: Record<string, string> = {
   live: 'Live', waiting: 'Waiting for phone', disconnected: 'Disconnected', no_probe: 'Not monitored',
-  disabled: 'Disabled', reconnecting: 'Reconnecting',
+  disabled: 'Disabled', reconnecting: 'Reconnecting', sending: 'Sending', retrying: 'Reconnecting',
 };
 
 export function pill(state: string | null | undefined, label?: string) {

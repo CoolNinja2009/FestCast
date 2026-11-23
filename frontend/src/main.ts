@@ -3,6 +3,7 @@ import { act, api, clear, connectWs, disposeAll, disposers, dur, h, live, loadSt
 import { overviewPage } from './pages/overview';
 import { camerasPage } from './pages/cameras';
 import { productionPage } from './pages/production';
+import { audioPage } from './pages/audio';
 import { presentationsPage } from './pages/presentations';
 import { outputsPage } from './pages/outputs';
 import { recordingsPage } from './pages/recordings';
@@ -14,6 +15,7 @@ const PAGES: [string, string, (el: HTMLElement) => void][] = [
   ['overview', 'Overview', overviewPage],
   ['cameras', 'Cameras', camerasPage],
   ['production', 'Production', productionPage],
+  ['audio', 'Audio', audioPage],
   ['presentations', 'Presentations', presentationsPage],
   ['outputs', 'Outputs', outputsPage],
   ['recordings', 'Recordings', recordingsPage],
@@ -27,6 +29,7 @@ const ICON: Record<string, string> = {
   overview: I('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
   cameras: I('<path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/>'),
   production: I('<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'),
+  audio: I('<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/>'),
   presentations: I('<path d="M2 3h20M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3M7 21l5-5 5 5"/>'),
   outputs: I('<rect x="2" y="7" width="20" height="15" rx="2"/><path d="m17 2-5 5-5-5"/>'),
   recordings: I('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/>'),
@@ -51,7 +54,7 @@ function shell() {
     })));
   const top = h('header.top', null,
     h('div.lead', null, h('div.brand', null, h('i'), 'FestCast'), fileMenu()),
-    live(h('div.row.grow'), ['cameras', 'obs', 'recording', 'production', 'server', 'link', '_file'], topBar));
+    live(h('div.row.grow'), ['cameras', 'obs', 'recording', 'production', 'server', 'link', '_file', 'live'], topBar));
   main = h('main', { id: 'main' });
   clear(app, top, nav, main);
 }
@@ -71,12 +74,22 @@ function topBar() {
     h('span.right'),
     h('span.tally', { class: obs.connected ? 'ok' : 'bad', title: obs.error || '' }, obs.connected ? `OBS ${obs.version?.obs || ''}` : 'OBS DOWN'),
     obs.program_scene ? h('span.tally.pgm', { title: 'Programme' }, 'PGM ', obs.program_scene) : null,
+    liveTally(),
     rec.active ? h('span.tally.rec', null, rec.paused ? 'REC PAUSED ' : 'REC ', dur(rec.duration_ms)) : h('span.tally', null, 'NOT RECORDING'),
     h('button.btn.standby', {
       class: standby ? 'active' : '', title: 'Emergency standby: puts the standby scene on programme now',
       onclick: () => standby ? (location.hash = '#/production') : act(() => api('POST', '/api/standby/on'), 'Standby on air'),
     }, standby ? 'STANDBY ON AIR' : 'STANDBY'),
   ];
+}
+
+function liveTally() {
+  const lv = store.get('live') || {};
+  if (!lv.on) return null;
+  const ds = (lv.destinations || []).filter((d: any) => d.enabled);
+  const ok = lv.sending || 0;
+  return h('span.tally', { class: ok === ds.length && ok ? 'onair' : 'warn', title: ds.map((d: any) => `${d.name}: ${d.state}`).join('\n'),
+    onclick: () => { location.hash = '#/outputs'; }, style: { cursor: 'pointer' } }, ok === ds.length ? `LIVE ${ok}` : `LIVE ${ok}/${ds.length}`);
 }
 
 function route() {

@@ -56,7 +56,10 @@ async def join_info(request: Request, token: str):
     prod = c.cameras.production()
     return JSONResponse({"camera": cam.name, "slot": cam.slot, "production": prod.name if prod else "",
                          "quality": cam.resolution_target, "fps": prod.fps if prod else 30, "publish_url": push,
-                         "transport": cam.transport, "https_port": c.https_port or None},
+                         "transport": cam.transport, "https_port": c.https_port or None,
+                         # VDO.Ninja cameras open inside FestCast's https page, which adds auto-turn (vcam.html)
+                         "wrap_url": (f"{c.https_base()}/vcam/{token}"
+                                      if cam.transport != "local" and c.https_port else None)},
                         headers=NOSTORE)
 
 
@@ -73,7 +76,7 @@ async def cam_page(request: Request, token: str):
     c = request.app.state.ctx
     if request.url.scheme != "https" and c.https_port:
         # phones only open the camera on https pages
-        return RedirectResponse(f"https://{request.url.hostname}:{c.https_port}/cam/{token}", status_code=307)
+        return RedirectResponse(f"{c.https_base()}/cam/{token}", status_code=307)
     return page(PAGES / "cam.html")
 
 
@@ -89,6 +92,44 @@ async def cam_info(request: Request, token: str):
     return JSONResponse({"camera": cam.name, "slot": cam.slot, "production": (c.cameras.production() or cam).name,
                          "width": w, "height": hgt, "fps": d["fps"], "bitrate_kbps": cam.bitrate_kbps,
                          "enabled": cam.enabled, "reload": c.cameras.reload_nonce.get(cam.id, 0)}, headers=NOSTORE)
+
+
+@router.get("/vcam/{token}")
+async def vcam_page(request: Request, token: str):
+    c = request.app.state.ctx
+    if request.url.scheme != "https" and c.https_port:
+        return RedirectResponse(f"{c.https_base()}/vcam/{token}", status_code=307)
+    return page(PAGES / "vcam.html")
+
+
+@router.post("/api/public/cam/{token}/orientation")
+async def cam_orientation(request: Request, token: str, body: dict):
+    """The local camera page reads the phone's motion sensor and says how the phone is held: `held` is the turn
+    (0, 90 or 270) a picture taken that way needs if it arrives tall (iPhone with Portrait Orientation Lock on).
+    FestCast applies it only while the frames it receives really are tall, so a phone that already sends landscape
+    frames is never turned."""
+    c = request.app.state.ctx
+    r = c.cameras.resolve_invite(token)               # local and VDO.Ninja cameras alike
+    if not r:
+        raise HTTPException(404, "This camera link is invalid, expired or was revoked.")
+    cam = r[0]
+    held = body.get("held") if isinstance(body, dict) else None
+    if held not in (0, 90, 180, 270):
+        raise HTTPException(400, "held must be 0, 90, 180 or 270")
+    rot = await c.cameras.phone_held(cam.id, held)
+    return {"ok": True, "rotation": rot}
+
+
+@router.get("/api/public/cam/{token}/tally")
+async def cam_tally(request: Request, token: str, v: int = -1):
+    """Tally light for the camera page (local and VDO.Ninja alike). Long-poll: with `v` = the version the page has,
+    the answer waits (up to 20 s) until the tally changes, so the light follows a cut within a moment."""
+    c = request.app.state.ctx
+    r = c.cameras.resolve_invite(token)
+    if not r:
+        raise HTTPException(404, "This camera link is invalid, expired or was revoked.")
+    await c.tally.wait(v)
+    return JSONResponse({"tally": c.tally.state(r[0].id), "v": c.tally.version}, headers=NOSTORE)
 
 
 @router.post("/api/public/cam/{token}/whip")
@@ -193,8 +234,10 @@ async def obs_standby(request: Request, k: str | None = None):
 
 
 @router.get("/obs/standby/state")
-async def obs_standby_state(request: Request, k: str | None = None):
+async def obs_standby_state(request: Request, k: str | None = None, at: str | None = None,
+                            seq: str | None = None):
     obs_only(request, k)
+    request.app.state.ctx.presentations.reported(at, seq)
     return JSONResponse(request.app.state.ctx.presentations.player_state(), headers=NOSTORE)
 
 
