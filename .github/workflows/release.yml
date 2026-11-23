@@ -107,7 +107,7 @@ jobs:
           - { os: windows-latest,   target: windows }
           - { os: ubuntu-22.04,     target: linux-x64 }     # older glibc = runs on more distros
           - { os: ubuntu-22.04-arm, target: linux-arm64 }   # Raspberry Pi 5, ARM servers
-          - { os: macos-14,         target: macos-arm64 }   # Apple silicon
+          - { os: macos-latest,     target: macos-arm64 }   # Apple silicon (always a current image)
           - { os: macos-15-intel,   target: macos-x64 }     # Intel Macs
     runs-on: ${{ matrix.os }}
     steps:
